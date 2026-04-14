@@ -1,14 +1,15 @@
 # The Coral Gables Weather Radar
 
-Interactive **ArcGIS Maps SDK for JavaScript** (3D) app: live and forecast weather over Coral Gables, Florida, shown on a deformable grid with **17 sampling points**, historical playback, **split-screen compare**, and alerts.
+3D **ArcGIS Maps SDK for JavaScript** app for Coral Gables, FL: live conditions, wind field arrows, forecasts, historical playback, split-screen comparison, and NWS alert toasts.
 
 ## Features
 
-- **Multi-source weather** — Open-Meteo, OpenWeatherMap, and NOAA (Weather.gov) merged in `weatherService.js`; NWS-oriented merge for the city center where configured.
-- **3D grid** — Temperature-driven relief and symbology; click cells or points for popups.
-- **Modes** — Current, 3h / 24h forecast, historical playback, **split-screen** (two scenes, linked selection and camera sync).
-- **IndexedDB** — Local snapshots for history and playback.
-- **Auto-refresh** — Intervals configurable in `js/config.js`.
+- **Multi-source weather merge** — Open‑Meteo, OpenWeatherMap (optional), and NOAA/NWS (Weather.gov) merged per-field.
+- **Wind vectors** — directional arrows at each sampling point + a dedicated Coral Gables indicator with popup.
+- **3D temperature surface** — relief-style mesh driven by the station field (interpolated between stations).
+- **Modes** — current, forecast, historical playback, and **split-screen compare**.
+- **Alerts & notices** — NWS alert feed toasts + themed “welcome” and microclimate notices.
+- **Local history** — IndexedDB snapshots for playback.
 
 ## Stack
 
@@ -27,7 +28,7 @@ coral-gables-weather-grid/
 ├── .env.example            # Copy → `.env` for API keys (gitignored)
 ├── styles/main.css
 ├── js/
-│   ├── main.js             # Scene, UI, split-screen, visualization
+│   ├── main.js             # App glue: state, scene, UI wiring
 │   ├── config.js           # Grid, APIs, scene, refresh intervals
 │   ├── samplingPoints.js
 │   ├── features/timeFeatures.js   # Forecast helpers, playback controller
@@ -37,6 +38,10 @@ coral-gables-weather-grid/
 │   │   ├── openweathermap.js
 │   │   └── noaa.js
 │   ├── storage/db.js
+│   ├── ui/
+│   │   └── dataStatus.js         # “Data / API sources / Stations” display helpers
+│   └── viz/
+│       └── wind.js               # Wind arrow rendering + CG indicator
 │   └── utils/
 │       ├── interpolation.js
 │       └── gridGenerator.js
@@ -86,7 +91,10 @@ If you bind to all interfaces, scanners may probe the port; paths like `${jndi:�
 
 ## Configuration
 
-- **Secrets** — Root **`.env`** or **`.env.local`** (copy from **`.env.example`**): `VITE_OPENWEATHERMAP_API_KEY=your_key` (no spaces around `=`; name **must** start with `VITE_`). After changing `.env`, run **`./run.sh`** again so the production bundle picks up the new values. Vite inlines these into the built JS; `js/config.js` uses literal `import.meta.env.VITE_*` access so that inlining works.
+- **Secrets** — Root **`.env`** or **`.env.local`** (copy from **`.env.example`**). Vite only exposes variables prefixed with `VITE_`.
+  - `VITE_OPENWEATHERMAP_API_KEY` (optional)
+  - `VITE_ARCGIS_API_KEY` (optional)
+  - `VITE_NWS_CONTACT_EMAIL` (recommended; appended to NWS User‑Agent)
 - **`js/config.js`** — WebScene / portal URLs, grid extent, refresh intervals, and all non-secret settings.
 
 ## Usage highlights
@@ -110,4 +118,4 @@ Modern Chromium / Firefox / Safari / Edge with **WebGL** and **IndexedDB**.
 
 ## License / credits
 
-Provided as-is for demonstration. Weather sources are credited in the app UI and provider modules. WebScene attribution follows the ArcGIS portal item used in `config.js`.
+Provided as-is for demonstration. Weather sources are credited in the app UI and provider modules. WebScene attribution follows the ArcGIS portal item used in `js/config.js`.

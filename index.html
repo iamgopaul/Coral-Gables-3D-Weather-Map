@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <!-- Local dev: http-server defaults to Cache: 3600s; avoid stale ES module / JS during iteration -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <title>The Coral Gables Weather Radar</title>
@@ -52,9 +52,9 @@
         <div id="refreshScanOverlay" class="refresh-scan-overlay hidden" aria-hidden="true"></div>
 
         <!-- Page header (outside the menu rail) -->
-        <div id="appPageHeader" class="app-page-header" aria-label="Application title">
+        <button id="appPageHeader" class="app-page-header" type="button" aria-label="Return to start view" title="Return to start view">
             <div class="app-page-header__title">The Coral Gables Weather Radar</div>
-        </div>
+        </button>
         
         <!-- Weather Menu: left rail, legend + controls -->
         <div id="mapTaskbar" class="map-taskbar panel panel--collapsible" aria-expanded="true">

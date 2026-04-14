@@ -49,6 +49,14 @@
     color-scheme: dark;
 }
 
+html {
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
 body {
     font-family:
         Inter,
@@ -63,13 +71,26 @@ body {
         'Apple Color Emoji',
         'Segoe UI Emoji';
     overflow: hidden;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
     background: #0a0d12;
 }
 
 #app {
-    width: 100vw;
-    height: 100vh;
     position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-height: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+    height: 100vh;
+    height: 100dvh;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
     background: var(--ui-surface-solid);
 }
 
@@ -288,7 +309,7 @@ body {
 .split-container .split-view::before {
     content: attr(data-label);
     position: absolute;
-    top: 12px;
+    bottom: 12px;
     left: 50%;
     transform: translateX(-50%);
     background: var(--ui-surface-raised);
@@ -413,7 +434,6 @@ body {
     top: calc(var(--map-frame-inset) + 10px);
     left: calc(var(--map-frame-inset) + 10px);
     z-index: 9;
-    pointer-events: none;
     display: flex;
     align-items: center;
     width: max-content;
@@ -424,6 +444,11 @@ body {
     border: 1px solid rgba(var(--ui-accent-rgb), 0.22);
     box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
     backdrop-filter: blur(12px);
+    cursor: pointer;
+    user-select: none;
+    appearance: none;
+    -webkit-appearance: none;
+    border-width: 1px;
 }
 
 .app-page-header__title {
@@ -433,6 +458,20 @@ body {
     text-transform: uppercase;
     color: rgba(var(--ui-accent-rgb), 0.92);
     text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+}
+
+.app-page-header:hover {
+    border-color: rgba(var(--ui-accent-rgb), 0.36);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42), 0 0 0 2px rgba(var(--ui-accent-rgb), 0.12);
+}
+
+.app-page-header:active {
+    transform: translateY(1px);
+}
+
+.app-page-header:focus-visible {
+    outline: 2px solid rgba(var(--ui-accent-rgb), 0.6);
+    outline-offset: 2px;
 }
 
 #app:has(#mapTaskbar:not(.panel--minimized)) .app-page-header {
@@ -1472,27 +1511,261 @@ select.lighting-test-hud-select option {
     color: var(--ui-text-muted) !important;
 }
 
-/* Responsive Design */
-@media (max-width: 768px) {
+/* Responsive — tablets / narrow windows: tighter chrome, still left-rail menu */
+@media (max-width: 1024px) and (min-width: 721px) {
     :root {
         --map-frame-inset: 10px;
-        --map-taskbar-expanded-w: min(260px, 78vw);
+        --map-taskbar-expanded-w: min(280px, 34vw);
+    }
+}
+
+/* Phones & small tablets — bottom-sheet Weather Menu, full-width map, stacked split view */
+@media (max-width: 720px) {
+    :root {
+        --map-frame-inset: 8px;
+        --map-mobile-sheet-max-h: min(56dvh, 440px);
+        --map-mobile-sheet-collapsed-h: 72px;
     }
 
     .map-taskbar__col--legend {
-        max-height: 36vh;
+        max-height: min(28dvh, 220px);
     }
 
     .map-taskbar__col--controls {
         font-size: 10px;
     }
 
+    /* Bottom sheet: Weather Menu anchored to lower edge (map uses full width above) */
+    #mapTaskbar.map-taskbar {
+        top: auto;
+        left: var(--map-frame-inset);
+        right: var(--map-frame-inset);
+        bottom: var(--map-frame-inset);
+        width: auto;
+        height: var(--map-mobile-sheet-max-h);
+        max-height: 56dvh;
+        border-radius: 14px 14px 0 0;
+        border: var(--map-frame-border);
+        border-bottom: none;
+        flex-direction: column;
+        box-shadow:
+            0 -8px 32px rgba(0, 0, 0, 0.45),
+            0 0 0 1px rgba(0, 0, 0, 0.35),
+            inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    #mapTaskbar.panel--minimized.map-taskbar {
+        height: auto;
+        max-height: none;
+        min-height: var(--map-mobile-sheet-collapsed-h);
+        border-radius: var(--map-frame-radius);
+        border-bottom: var(--map-frame-border);
+    }
+
+    /* Map frame: menu no longer consumes horizontal space */
+    #app:has(#mapTaskbar:not(.panel--minimized)) > #viewDiv,
+    #app:has(#mapTaskbar.panel--minimized) > #viewDiv {
+        left: var(--map-frame-inset);
+        right: var(--map-frame-inset);
+        top: var(--map-frame-inset);
+    }
+
+    #app:has(#mapTaskbar:not(.panel--minimized)) > #viewDiv {
+        bottom: calc(var(--map-frame-inset) + var(--map-mobile-sheet-max-h) + 2px);
+    }
+
+    #app:has(#mapTaskbar.panel--minimized) > #viewDiv {
+        bottom: calc(var(--map-frame-inset) + var(--map-mobile-sheet-collapsed-h) + 2px);
+    }
+
+    #app:has(#mapTaskbar:not(.panel--minimized)) > #splitViewContainer.split-container,
+    #app:has(#mapTaskbar.panel--minimized) > #splitViewContainer.split-container {
+        left: var(--map-frame-inset);
+        right: var(--map-frame-inset);
+        top: var(--map-frame-inset);
+    }
+
+    #app:has(#mapTaskbar:not(.panel--minimized)) > #splitViewContainer.split-container {
+        bottom: calc(var(--map-frame-inset) + var(--map-mobile-sheet-max-h) + 2px);
+    }
+
+    #app:has(#mapTaskbar.panel--minimized) > #splitViewContainer.split-container {
+        bottom: calc(var(--map-frame-inset) + var(--map-mobile-sheet-collapsed-h) + 2px);
+    }
+
+    #refreshScanOverlay {
+        top: var(--map-frame-inset);
+        left: var(--map-frame-inset);
+        right: var(--map-frame-inset);
+    }
+
+    #app:has(#mapTaskbar:not(.panel--minimized)) > #refreshScanOverlay {
+        bottom: calc(var(--map-frame-inset) + var(--map-mobile-sheet-max-h) + 2px);
+    }
+
+    #app:has(#mapTaskbar.panel--minimized) > #refreshScanOverlay {
+        bottom: calc(var(--map-frame-inset) + var(--map-mobile-sheet-collapsed-h) + 2px);
+    }
+
+    /* Title chip: centered above map; not offset by former left rail */
+    #app:has(#mapTaskbar:not(.panel--minimized)) .app-page-header,
+    #app:has(#mapTaskbar.panel--minimized) .app-page-header {
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+        max-width: min(96%, calc(100% - 2 * var(--map-frame-inset)));
+    }
+
+    .app-page-header__title {
+        font-size: clamp(10px, 2.8vw, 12px);
+    }
+
+    /* Collapsed menu: single horizontal strip (readable on narrow screens) */
+    #mapTaskbar.panel--minimized .map-taskbar__header {
+        flex-direction: row;
+        align-items: center;
+        flex-wrap: nowrap;
+        justify-content: space-between;
+        padding: 10px 12px;
+        gap: 8px;
+    }
+
+    #mapTaskbar.panel--minimized .map-taskbar__title {
+        display: block;
+        font-size: 0.8rem;
+        max-width: 36vw;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    #mapTaskbar.panel--minimized .map-taskbar__header-brand {
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 8px;
+        width: auto;
+        flex: 1;
+        min-width: 0;
+    }
+
+    #mapTaskbar.panel--minimized .map-taskbar__clock-date--single {
+        display: block !important;
+    }
+
+    #mapTaskbar.panel--minimized .map-taskbar__clock-date-stack {
+        display: none !important;
+    }
+
+    #mapTaskbar.panel--minimized .map-taskbar__clock {
+        flex-direction: row;
+        align-items: baseline;
+        gap: 6px;
+    }
+
+    #mapTaskbar.panel--minimized .map-taskbar__header-temp {
+        display: block;
+        font-size: 0.85rem;
+    }
+
+    #mapTaskbar.panel--minimized .map-taskbar__header .panel-minimize-btn {
+        width: 40px;
+        height: 40px;
+        min-width: 40px;
+        font-size: 1.15rem;
+    }
+
+    .panel-minimize-btn {
+        min-width: 44px;
+        min-height: 44px;
+        touch-action: manipulation;
+    }
+
+    .app-page-header {
+        touch-action: manipulation;
+        padding: 10px 14px;
+    }
+
+    /* Keep title centered when pressed (base rule uses translateY only) */
+    .app-page-header:active {
+        transform: translateX(-50%) translateY(1px);
+    }
+
+    /* Split compare: stack panes vertically on small screens */
+    .split-container {
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .split-container .split-view {
+        flex: 1 1 42%;
+        min-height: 100px;
+    }
+
+    .split-container .split-view::before {
+        font-size: 11px;
+        padding: 6px 12px;
+        bottom: 8px;
+    }
+
+    /* Toasts: centered; menu is no longer on the left */
     .alert-toast-host {
-        width: min(300px, calc(100vw - 2 * var(--map-frame-inset) - var(--map-taskbar-expanded-w) - 12px));
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(400px, calc(100% - 16px));
+        max-height: min(42dvh, 420px);
+    }
+
+    #app:has(#mapTaskbar.panel--minimized) .alert-toast-host {
+        left: 50%;
+        width: min(400px, calc(100% - 16px));
     }
 
     .alert-toast {
-        font-size: 10px;
-        padding: 7px 9px;
+        font-size: 10.5px;
+        padding: 9px 10px;
+    }
+
+    .alert-toast__dismiss {
+        min-width: 44px;
+        min-height: 44px;
+        padding: 10px 12px;
+        touch-action: manipulation;
+    }
+
+    .esri-popup__main-container {
+        max-width: min(360px, 92vw) !important;
+    }
+
+    .esri-ui-corner .esri-component {
+        margin: 6px !important;
+    }
+
+    #loadingIndicator {
+        width: min(340px, calc(100% - 24px));
+        padding: 16px;
+        box-sizing: border-box;
+    }
+
+    /* Keep Esri weather widget above the bottom sheet */
+    #app:has(#mapTaskbar:not(.panel--minimized)) .esri-weather-widget-host.esri-weather-widget-host--visible {
+        bottom: calc(
+            var(--ui-overlay-offset) + min(56dvh, 440px) + 6px
+        );
+    }
+
+    #app:has(#mapTaskbar.panel--minimized) .esri-weather-widget-host.esri-weather-widget-host--visible {
+        bottom: calc(var(--ui-overlay-offset) + var(--map-mobile-sheet-collapsed-h) + 6px);
+    }
+}
+
+/* Extra-narrow: slightly tighter sheet so map keeps more room */
+@media (max-width: 380px) {
+    :root {
+        --map-mobile-sheet-max-h: min(52dvh, 400px);
+    }
+
+    .app-page-header__title {
+        letter-spacing: 0.04em;
     }
 }
