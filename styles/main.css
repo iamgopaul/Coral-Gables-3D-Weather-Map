@@ -1013,6 +1013,15 @@ select.lighting-test-hud-select option {
     font-weight: 600;
 }
 
+.api-sources {
+    margin-left: 6px;
+    color: var(--ui-text-dim);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+}
+
 /* Weather alert toasts — top center of framed map (offset for left Weather Menu) */
 .alert-toast-host {
     position: absolute;
