@@ -10,7 +10,7 @@ import * as OpenMeteo from './openmeteo.js';
  * **Units (after parse):** temperature °F, wind speed mph, wind gust mph, pressure ~mb,
  * wind direction ° **meteorological** (direction the wind blows *from*, 0–360 clockwise from N).
  * Open-Meteo requests `temperature_unit=fahrenheit&wind_speed_unit=mph`; OpenWeatherMap uses `units=imperial`;
- * NOAA observations convert °C→°F and m/s→mph in `noaa.js`.
+ * NOAA observations convert °C→°F and NWS wind `QuantitativeValue` (e.g. km/h)→mph in `noaa.js`.
  */
 
 let warnedMissingOpenWeatherMapKey = false;

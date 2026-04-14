@@ -129,8 +129,11 @@ export async function fetchWeatherAlerts(latitude, longitude) {
     }
 }
 
-/** NWS observation wind is m/s; app uses mph everywhere for display and merge. */
+/** App uses mph everywhere for display and merge. */
 const METERS_PER_SECOND_TO_MPH = 2.2369362920544;
+/** NWS `wmoUnit:km_h-1` (km/h) → mph */
+const KMH_TO_MPH = 1 / 1.609344;
+const KNOTS_TO_MPH = 1.1507794480235;
 
 function celsiusToFahrenheitNullable(c) {
     if (c === null || c === undefined || Number.isNaN(Number(c))) {
@@ -139,11 +142,32 @@ function celsiusToFahrenheitNullable(c) {
     return (Number(c) * 9) / 5 + 32;
 }
 
-function metersPerSecondToMphNullable(ms) {
-    if (ms === null || ms === undefined || Number.isNaN(Number(ms))) {
+/**
+ * NWS observation wind speed/gust uses `QuantitativeValue`: numeric `value` plus `unitCode`
+ * (often `wmoUnit:km_h-1`, not m/s). Converting km/h as m/s inflates mph by ~3.6×.
+ * @param {{ value?: number|null, unitCode?: string }|null|undefined} q
+ * @returns {number|null}
+ */
+function nwsWindQuantityToMph(q) {
+    if (!q || q.value === null || q.value === undefined || Number.isNaN(Number(q.value))) {
         return null;
     }
-    return Number(ms) * METERS_PER_SECOND_TO_MPH;
+    const v = Number(q.value);
+    const code = typeof q.unitCode === 'string' ? q.unitCode : '';
+    if (code.includes('km_h-1') || code.includes('km/h')) {
+        return v * KMH_TO_MPH;
+    }
+    if (code.includes('m_s-1') || code.includes('m_s_1') || code.includes('m/s')) {
+        return v * METERS_PER_SECOND_TO_MPH;
+    }
+    if (code.includes('kn') || code.includes('Knot')) {
+        return v * KNOTS_TO_MPH;
+    }
+    if (!code) {
+        return null;
+    }
+    console.warn('[NOAA] unknown wind unitCode; omitting wind value:', code);
+    return null;
 }
 
 function pickNoaaFeelsLikeF(props) {
@@ -159,7 +183,8 @@ function pickNoaaFeelsLikeF(props) {
 }
 
 /**
- * Parse NOAA observation (api.weather.gov) — temps in °C and wind in m/s from API; output matches other providers: °F, mph, wind direction ° meteorological (from).
+ * Parse NOAA observation (api.weather.gov) — temps in °C from API; wind uses QuantitativeValue
+ * (typically km/h). Output matches other providers: °F, mph, wind direction ° meteorological (from).
  */
 function parseNOAAObservation(data) {
     const props = data.properties;
@@ -172,13 +197,13 @@ function parseNOAAObservation(data) {
         feelsLike: pickNoaaFeelsLikeF(props),
         humidity: humidityRaw !== null && humidityRaw !== undefined ? humidityRaw : null,
         pressure: pressurePa != null && !Number.isNaN(Number(pressurePa)) ? Number(pressurePa) / 100 : null,
-        windSpeed: metersPerSecondToMphNullable(props.windSpeed?.value),
+        windSpeed: nwsWindQuantityToMph(props.windSpeed),
         /** Degrees clockwise from true N, 0–360: direction wind blows *from* (same as Open-Meteo / OpenWeatherMap). */
         windDirection:
             props.windDirection?.value !== null && props.windDirection?.value !== undefined
                 ? Number(props.windDirection.value)
                 : null,
-        windGust: metersPerSecondToMphNullable(props.windGust?.value),
+        windGust: nwsWindQuantityToMph(props.windGust),
         precipitation: 0,
         cloudCover:
             props.cloudLayers && props.cloudLayers.length > 0
