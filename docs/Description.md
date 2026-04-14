@@ -1,6 +1,6 @@
 # Project description — Coral Gables Weather Grid
 
-**The Coral Gables Weather Radar** is a browser-based **3D weather visualization** focused on **Coral Gables, Florida**. It combines a public **ArcGIS** city scene with **live and forecast weather** from multiple public APIs, a **station grid** with interpolated conditions, **wind arrows**, **historical playback** from local storage, and **National Weather Service** alerts.
+**The Coral Gables Weather Radar** is a browser-based **3D weather visualization** focused on **Coral Gables, Florida**. It combines a public **ArcGIS** city scene with **live and forecast weather** from multiple public APIs, a **station grid** with interpolated conditions, **wind arrows**, **historical playback** over roughly the **last 48 hours** (hourly Open-Meteo backfill, with local snapshot fallback), and **National Weather Service** alerts.
 
 This document is a **high-level product overview** of what the project **is** and **does today**. For setup, scripts, and repo layout, see **`../README.md`**. For external services, merge rules, and trust notes, see **`API.md`**.
 
@@ -32,7 +32,7 @@ The app is meant to give residents, students, and curious users a **spatial** vi
 
 - **Current** — Latest merged conditions and interpolated grid.
 - **Forecast** — Same grid logic using forecast periods at the chosen offset.
-- **Historical** — Plays back **snapshots** stored in the browser (**IndexedDB**) so you can scrub through past states the app has recorded.
+- **Historical** — Loads **hourly frames** for the retention window (typically ~48 hours) by requesting **Open-Meteo** hourly series for each station (UTC-aligned, then intersected across the grid). If that fails, playback falls back to **IndexedDB** snapshots saved during earlier refreshes. The timeline slider scrubs those frames (about one per hour when the API path succeeds).
 - **Split-screen** — Compare two modes side by side (e.g. current vs forecast) with linked navigation where implemented.
 
 ### Alerts and messaging
@@ -42,7 +42,7 @@ The app is meant to give residents, students, and curious users a **spatial** vi
 
 ### Persistence
 
-- Saves periodic **weather snapshots** locally for **history** and playback; retention is configurable. Nothing is sent to a project-specific backend—data stays in the **user’s browser** unless the user deploys or modifies the app.
+- Saves **weather snapshots** in **IndexedDB** on refresh (same retention window as playback) for pruning and **fallback** playback. **Historical** mode itself primarily uses **Open-Meteo** hourly data fetched in the browser when you open that mode (no project backend). Nothing is sent to a project-specific server by default.
 
 ### Developer experience
 
@@ -55,7 +55,7 @@ The app is meant to give residents, students, and curious users a **spatial** vi
 - **Not** an official NWS or government product—though it **uses** NWS data among others.
 - **Not** a certified source for aviation, marine, or emergency decisions.
 - **Not** a guarantee of forecast accuracy; skill depends on the underlying APIs and on interpolation between points.
-- **Not** a server-hosted personal weather database for all users by default—history is **local** to each browser profile.
+- **Not** a server-hosted archive for all users—**offline** snapshot history is **local** to each browser profile; **Historical** mode still needs network access for the primary Open-Meteo hourly load.
 
 ---
 

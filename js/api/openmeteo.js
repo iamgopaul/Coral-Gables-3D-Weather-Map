@@ -139,3 +139,60 @@ function parseForecastData(data) {
         source: 'Open-Meteo'
     };
 }
+
+/**
+ * Hourly time series for the recent past (and optional near future), for historical playback.
+ * Uses `timezone=UTC` so every grid station gets identical `hourly.time` keys for alignment.
+ * @returns {Promise<{ hourly: object[], source: string }>}
+ */
+export async function fetchHourlyPastWindow(latitude, longitude) {
+    const url =
+        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}` +
+        `&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl` +
+        `&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=UTC&past_days=2&forecast_days=0`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+        throw new Error(`Open-Meteo hourly API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return parseHourlyWindowData(data);
+}
+
+/**
+ * @param {object} data — Open-Meteo forecast JSON with `hourly`
+ * @returns {{ hourly: object[], source: string }}
+ */
+function parseHourlyWindowData(data) {
+    const hourly = data.hourly;
+    if (!hourly || !Array.isArray(hourly.time) || hourly.time.length === 0) {
+        return { hourly: [], source: 'Open-Meteo' };
+    }
+
+    const rows = [];
+    for (let i = 0; i < hourly.time.length; i++) {
+        const weatherInfo = getWeatherDescription(hourly.weather_code[i]);
+        const pMsl = hourly.pressure_msl?.[i];
+        rows.push({
+            timestamp: new Date(hourly.time[i]).getTime(),
+            temperature: hourly.temperature_2m[i],
+            feelsLike: hourly.temperature_2m[i],
+            humidity: hourly.relative_humidity_2m[i],
+            pressure:
+                pMsl != null && pMsl !== undefined && !Number.isNaN(Number(pMsl))
+                    ? Math.round(Number(pMsl))
+                    : null,
+            windSpeed: hourly.wind_speed_10m[i],
+            windDirection: hourly.wind_direction_10m[i],
+            windGust: hourly.wind_gusts_10m[i],
+            precipitation: hourly.precipitation[i],
+            weather: weatherInfo.weather,
+            weatherDescription: weatherInfo.description,
+            source: 'Open-Meteo'
+        });
+    }
+
+    return { hourly: rows, source: 'Open-Meteo' };
+}

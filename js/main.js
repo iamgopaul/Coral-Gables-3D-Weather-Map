@@ -1365,10 +1365,57 @@ async function persistWeatherSnapshotAndReloadHistory(weatherResults) {
         }
         state.historicalSnapshots = await TimeFeatures.getHistoricalSnapshots();
         updateSnapshotCount();
+        if (state.currentMode === 'historical') {
+            const prevIdx = state.playbackController?.getCurrentIndex?.();
+            const ok = await hydrateHistoricalSnapshotsFromApi({ preservePlaybackIndex: prevIdx });
+            if (!ok) {
+                rebindHistoricalPlaybackController(prevIdx);
+            }
+        }
     } catch (dbError) {
         const dm = dbError && dbError.message ? dbError.message : String(dbError);
         console.error('DB storage / history reload failed:', dbError);
         debugLog('⚠ Could not save snapshot or reload history: ' + dm, true);
+    }
+}
+
+/**
+ * Load ~48h of hourly frames from Open-Meteo (UTC) so playback is dense, not only local IndexedDB snapshots.
+ * @param {{ preservePlaybackIndex?: number }} [options]
+ * @returns {Promise<boolean>} true if API snapshots are in use
+ */
+async function hydrateHistoricalSnapshotsFromApi(options = {}) {
+    const { preservePlaybackIndex } = options;
+    if (!state.samplingPoints || state.samplingPoints.length === 0) {
+        return false;
+    }
+    try {
+        debugLog('Loading 48-hour hourly history from Open-Meteo…');
+        const batch = await WeatherService.fetchBatchHistoricalHourly(state.samplingPoints, (cur, tot) => {
+            debugLog(`Historical hourly fetch ${cur}/${tot}`);
+        });
+        const snapshots = TimeFeatures.buildSnapshotsFromHistoricalHourly(
+            batch,
+            CONFIG.HISTORICAL_DATA_RETENTION
+        );
+        if (snapshots.length === 0) {
+            debugLog('⚠ Open-Meteo hourly did not yield aligned frames; will fall back to stored snapshots');
+            return false;
+        }
+        state.historicalSnapshots = snapshots;
+        updateSnapshotCount();
+        rebindHistoricalPlaybackController(
+            typeof preservePlaybackIndex === 'number' && Number.isFinite(preservePlaybackIndex)
+                ? preservePlaybackIndex
+                : undefined
+        );
+        debugLog(`✓ Historical playback: ${snapshots.length} hourly frames (past ${CONFIG.HISTORICAL_DATA_RETENTION / 3600000}h window)`);
+        return true;
+    } catch (e) {
+        const msg = e && e.message ? e.message : String(e);
+        console.warn('[playback] Open-Meteo historical hourly failed:', e);
+        debugLog('⚠ Historical hourly API failed: ' + msg, true);
+        return false;
     }
 }
 
@@ -2374,22 +2421,36 @@ function rebindHistoricalPlaybackController(preserveIndex) {
 }
 
 /**
- * Initialize playback mode — reloads snapshots from IndexedDB (48h window) so the timeline matches stored history.
+ * Initialize playback mode — prefers Open-Meteo hourly backfill for a full ~48h timeline; falls back to IndexedDB snapshots.
  */
 async function initializePlayback() {
+    const prevIdx = state.playbackController?.getCurrentIndex?.();
+    let usedApi = false;
     try {
-        state.historicalSnapshots = await TimeFeatures.getHistoricalSnapshots();
-        updateSnapshotCount();
+        usedApi = await hydrateHistoricalSnapshotsFromApi({ preservePlaybackIndex: prevIdx });
     } catch (e) {
-        console.warn('[playback] failed to load historical snapshots:', e);
+        console.warn('[playback] hydrate failed:', e);
+    }
+
+    if (!usedApi) {
+        try {
+            state.historicalSnapshots = await TimeFeatures.getHistoricalSnapshots();
+            updateSnapshotCount();
+        } catch (e) {
+            console.warn('[playback] failed to load historical snapshots:', e);
+        }
     }
 
     if (state.historicalSnapshots.length === 0) {
-        showError('No historical data available yet. Data collection starts now.');
+        showError(
+            'No historical playback data yet. Wait for a live refresh, or check your network and try again.'
+        );
         return;
     }
 
-    rebindHistoricalPlaybackController();
+    if (!usedApi) {
+        rebindHistoricalPlaybackController(prevIdx);
+    }
 
     debugLog('Playback initialized');
 }

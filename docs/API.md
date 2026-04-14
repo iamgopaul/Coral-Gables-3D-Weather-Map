@@ -9,7 +9,7 @@ This document describes **external services** the app calls from the browser, ho
 | API / service                        | Auth                              | Primary role in this app                                                                              |
 | ------------------------------------ | --------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | **api.weather.gov** (NWS)            | None; `User-Agent` required       | US station observations, hourly forecast, **active alerts**; often preferred for “live” US conditions |
-| **Open-Meteo**                       | None (`api.open-meteo.com`)       | Global current + forecast; **always** used when other sources fail                                    |
+| **Open-Meteo**                       | None (`api.open-meteo.com`)       | Global current + forecast; **hourly past window** for historical playback; **always** used when other sources fail |
 | **OpenWeatherMap**                   | API key (`VITE_*`)                | Optional third source for current + 5‑day/3‑h forecast                                                |
 | **ArcGIS / Esri**                    | Optional API key; public WebScene | 3D map, scene, **Maps SDK** loaded from CDN                                                           |
 | **Vite dev server** (`/__debug_log`) | Local only                        | Forwards browser logs to the terminal during `npm run dev` / `preview` — not a weather API            |
@@ -59,8 +59,11 @@ Headers: **`User-Agent`** is set from `CONFIG.NWS_USER_AGENT` (`js/config.js`), 
 | ----------------------- | ------------------------------------------------------------ | --------------------- |
 | Current conditions      | `GET https://api.open-meteo.com/v1/forecast?...&current=...` | `js/api/openmeteo.js` |
 | Hourly forecast (3‑day) | Same API with `hourly=...`                                   | `js/api/openmeteo.js` |
+| Hourly **past** window  | Same API with `hourly=...`, **`past_days=2`**, **`forecast_days=0`**, **`timezone=UTC`** | `js/api/openmeteo.js` (`fetchHourlyPastWindow`) |
 
-Parameters include **`temperature_unit=fahrenheit`**, **`wind_speed_unit=mph`**, **`timezone=auto`**. Forecast hourly series is **subsampled every 3 hours** in the parser when building the `forecasts` array (fewer periods than full hourly).
+Parameters for current/forecast include **`temperature_unit=fahrenheit`**, **`wind_speed_unit=mph`**, **`timezone=auto`**. Forecast hourly series is **subsampled every 3 hours** in the parser when building the `forecasts` array (fewer periods than full hourly).
+
+The **historical playback** path uses **`timezone=UTC`** so every sampling point shares identical `hourly.time` keys; `weatherService.fetchBatchHistoricalHourly` requests one such series per station, then `timeFeatures.buildSnapshotsFromHistoricalHourly` intersects timestamps and trims to the configured retention window (see `README.md` → _Historical playback_).
 
 ### Trust and accuracy
 
@@ -73,6 +76,7 @@ Parameters include **`temperature_unit=fahrenheit`**, **`wind_speed_unit=mph`**,
 - Always fetched for **current** and **forecast** in `weatherService.js` (alongside NOAA and optionally OWM).
 - **Merge**: Competes field-by-field with other sources using **`MERGE_PRIORITY_*`**.
 - **Enrichment**: Supplies **pressure** and **gust** for forecast periods when the winning NWS timeline omits them.
+- **Historical playback**: `fetchBatchHistoricalHourly` drives the **Historical** view; values are **model / reanalysis-style hourly fields**, not a guarantee of past ASOS observations at each pin.
 
 ---
 
@@ -139,6 +143,7 @@ The **3D map** is built with **ArcGIS Maps SDK for JavaScript** (loaded from CDN
 1. **Current weather** — Multiple sources are fetched; **`mergeWeatherData`** in `js/api/weatherService.js` picks values per field using **`MERGE_PRIORITY_DEFAULT`** or **`MERGE_PRIORITY_NOAA_FIRST`** for the city center.
 2. **Forecast** — Each location gets parallel forecast calls; the object with the **most periods** is kept, then **pressure** and **wind gust** are filled from other successful responses if missing.
 3. **Grid display** — Station values are **interpolated** (IDW) in `js/utils/interpolation.js`; the map is **not** a full numerical weather model.
+4. **Historical playback** — Prefer **Open-Meteo hourly past** (`fetchBatchHistoricalHourly` → `buildSnapshotsFromHistoricalHourly`); if that yields no frames, use **IndexedDB** snapshots in the same retention window (`timeFeatures.getHistoricalSnapshots`).
 
 For a shorter product-oriented summary, see **`../README.md`** → _Forecast & merge_.
 

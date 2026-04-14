@@ -445,6 +445,69 @@ export async function fetchBatchForecast(samplingPoints, onProgress = null) {
 }
 
 /**
+ * Per-station hourly series (UTC) for the last ~48h from Open-Meteo, for historical playback.
+ * @param {object[]} samplingPoints — `{ id, latitude, longitude }`
+ * @param {(done: number, total: number) => void} [onProgress]
+ * @returns {Promise<{ pointId: string, success: boolean, hourly?: object[], latitude?: number, longitude?: number, error?: string }[]>}
+ */
+export async function fetchBatchHistoricalHourly(samplingPoints, onProgress = null) {
+    const n = samplingPoints.length;
+    if (n === 0) {
+        return [];
+    }
+
+    const concurrency = Math.max(1, Math.min(Number(CONFIG.WEATHER_BATCH_CONCURRENCY) || 6, n));
+    const waveGap = Number(CONFIG.WEATHER_BATCH_WAVE_GAP_MS) || 0;
+    const results = new Array(n);
+    let completed = 0;
+
+    const bump = () => {
+        completed++;
+        if (onProgress) {
+            onProgress(completed, n);
+        }
+    };
+
+    async function fetchIndex(i) {
+        const point = samplingPoints[i];
+        try {
+            const { hourly } = await OpenMeteo.fetchHourlyPastWindow(point.latitude, point.longitude);
+            results[i] = {
+                pointId: point.id,
+                latitude: point.latitude,
+                longitude: point.longitude,
+                hourly: hourly || [],
+                success: true
+            };
+        } catch (error) {
+            console.error(`Failed to fetch historical hourly for point ${point.id}:`, error);
+            results[i] = {
+                pointId: point.id,
+                latitude: point.latitude,
+                longitude: point.longitude,
+                error: error.message,
+                success: false
+            };
+        }
+        bump();
+    }
+
+    for (let start = 0; start < n; start += concurrency) {
+        const end = Math.min(start + concurrency, n);
+        const wave = [];
+        for (let i = start; i < end; i++) {
+            wave.push(fetchIndex(i));
+        }
+        await Promise.all(wave);
+        if (waveGap > 0 && end < n) {
+            await new Promise((r) => setTimeout(r, waveGap));
+        }
+    }
+
+    return results;
+}
+
+/**
  * Get forecast at specific time offset
  */
 export function getForecastAtOffset(forecastData, hoursAhead) {

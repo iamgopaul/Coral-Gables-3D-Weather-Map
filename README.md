@@ -9,7 +9,7 @@
 - **3D temperature surface** — relief-style mesh driven by the station field (interpolated between stations); grid looks include **Gulf Glass** (translucent), Basic Grid, and Tidefield Membrane.
 - **Modes** — current, forecast, historical playback, and **split-screen compare** (linked popups and wind selection across panes).
 - **Alerts & notices** — NWS alert feed toasts + themed welcome and microclimate notices (auto-dismiss timing configurable).
-- **Local history** — IndexedDB snapshots for playback.
+- **Historical playback (~48h)** — On entering **Historical** mode, the app fetches **UTC-aligned hourly series** from **Open-Meteo** for every sampling point (past two days, trimmed to the configured retention window) so you get a dense timeline without waiting for local snapshots. **IndexedDB** still stores snapshots on refresh (for retention/pruning) and is used as a **fallback** if the hourly fetch fails or yields no aligned frames.
 - **Sampling points** — popups include human-readable Coral Gables area labels and coordinates.
 
 ## Stack
@@ -51,9 +51,9 @@ coral-gables-weather-grid/
 │   ├── main.js             # App glue: state, scene, UI wiring
 │   ├── config.js           # Grid, APIs, scene, refresh intervals
 │   ├── samplingPoints.js
-│   ├── features/timeFeatures.js   # Forecast helpers, playback controller
+│   ├── features/timeFeatures.js   # Forecast helpers, playback, snapshot builders
 │   ├── api/
-│   │   ├── weatherService.js     # Merge + fetch orchestration
+│   │   ├── weatherService.js     # Merge + batch current/forecast/historical hourly
 │   │   ├── openmeteo.js
 │   │   ├── openweathermap.js
 │   │   └── noaa.js
@@ -128,6 +128,12 @@ If you bind to all interfaces, scanners may probe the port; paths like `${jndi:�
 - **3h / 24h views** — The app picks the forecast period whose timestamp is **nearest** to “now + 3 hours” or “now + 24 hours” (not necessarily an exact clock step).
 - **Map grid** — Cells use **inverse-distance weighting** between station forecasts; this smooths spatially and is not a mesoscale model.
 
+### Historical playback
+
+- **Primary path** — `fetchBatchHistoricalHourly` in `js/api/weatherService.js` calls Open-Meteo’s **forecast** endpoint with `past_days=2`, `forecast_days=0`, and **`timezone=UTC`** (`js/api/openmeteo.js`) so all stations share the same hour keys. `buildSnapshotsFromHistoricalHourly` in `js/features/timeFeatures.js` intersects timestamps and builds frames within `HISTORICAL_DATA_RETENTION` (48 hours in `js/config.js`).
+- **Fallback** — If that pipeline returns no frames, playback uses **IndexedDB** snapshots collected while the app was refreshing (same retention window).
+- **Interpretation** — Hourly values are **Open-Meteo’s gridded product**, not a dense archive of NWS station observations; they match the style of model-backed data used elsewhere on the grid.
+
 Forecast skill is limited by the providers; the app does not run its own NWP.
 
 ## Configuration
@@ -136,7 +142,7 @@ Forecast skill is limited by the providers; the app does not run its own NWP.
     - `VITE_OPENWEATHERMAP_API_KEY` (optional)
     - `VITE_ARCGIS_API_KEY` (optional)
     - `VITE_NWS_CONTACT_EMAIL` (recommended; appended to NWS User‑Agent)
-- **`js/config.js`** — WebScene / portal URLs, grid extent, refresh intervals, and all non-secret settings.
+- **`js/config.js`** — WebScene / portal URLs, grid extent, refresh intervals, **`HISTORICAL_DATA_RETENTION`** (48h window for playback and IndexedDB prune), and all non-secret settings.
 
 ## Development & CI
 
@@ -154,7 +160,7 @@ Forecast skill is limited by the providers; the app does not run its own NWP.
 
 Locally, **`./run.sh --check`** runs lint, format check, and tests before build (optional; use before pushing if you are not relying on CI).
 
-**Manual smoke check before a release:** load the app over HTTP, wait for the temperature grid, switch View Mode through Current → 3h forecast → split-screen → historical, trigger **Refresh**, and confirm the browser console stays free of uncaught errors.
+**Manual smoke check before a release:** load the app over HTTP, wait for the temperature grid, switch View Mode through Current → 3h forecast → split-screen → **historical** (confirm the timeline loads from Open-Meteo hourly backfill), trigger **Refresh**, and confirm the browser console stays free of uncaught errors.
 
 ## Usage highlights
 

@@ -3,7 +3,8 @@ import {
     getSnapshotAtTime,
     getForecastData,
     formatTimestamp,
-    interpolateSnapshots
+    interpolateSnapshots,
+    buildSnapshotsFromHistoricalHourly
 } from '../js/features/timeFeatures.js';
 
 describe('getSnapshotAtTime', () => {
@@ -78,6 +79,60 @@ describe('formatTimestamp', () => {
         const s = formatTimestamp(Date.UTC(2024, 0, 15, 14, 30, 0));
         expect(s).toMatch(/Jan/);
         expect(s).toMatch(/15/);
+    });
+});
+
+describe('buildSnapshotsFromHistoricalHourly', () => {
+    it('returns empty when any station failed or hourly missing', () => {
+        expect(
+            buildSnapshotsFromHistoricalHourly(
+                [{ pointId: 'a', success: true, hourly: [{ timestamp: 1 }] }, { pointId: 'b', success: false }],
+                48 * 3600000
+            )
+        ).toEqual([]);
+    });
+
+    it('builds aligned snapshots for common timestamps within retention', () => {
+        const t0 = 1_000_000;
+        const t1 = t0 + 3600000;
+        const row = (ts) => ({
+            timestamp: ts,
+            temperature: 70,
+            feelsLike: 70,
+            humidity: 50,
+            pressure: 1013,
+            windSpeed: 5,
+            windDirection: 180,
+            windGust: 10,
+            precipitation: 0,
+            weather: 'clear',
+            weatherDescription: 'Clear',
+            source: 'Open-Meteo'
+        });
+        const batch = [
+            {
+                pointId: 'a',
+                latitude: 1,
+                longitude: 2,
+                success: true,
+                hourly: [row(t0), row(t1)]
+            },
+            {
+                pointId: 'b',
+                latitude: 3,
+                longitude: 4,
+                success: true,
+                hourly: [row(t0), row(t1)]
+            }
+        ];
+        const now = t1 + 1000;
+        const snaps = buildSnapshotsFromHistoricalHourly(batch, 48 * 3600000, now);
+        expect(snaps).toHaveLength(2);
+        expect(snaps[0].timestamp).toBe(t0);
+        expect(snaps[0].data).toHaveLength(2);
+        expect(snaps[0].data[0].pointId).toBe('a');
+        expect(snaps[0].data[1].pointId).toBe('b');
+        expect(snaps[1].data[0].temperature).toBe(70);
     });
 });
 

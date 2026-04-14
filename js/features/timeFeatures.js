@@ -25,6 +25,83 @@ export async function getHistoricalSnapshots() {
 }
 
 /**
+ * Build playback snapshots from per-station Open-Meteo hourly rows (UTC-aligned timestamps).
+ * Requires every station to have succeeded and at least one common hour across all stations.
+ * @param {object[]} batchResults — rows from `fetchBatchHistoricalHourly` (`weatherService.js`)
+ * @param {number} retentionMs — wall-clock window ending at `nowMs` (e.g. {@link CONFIG.HISTORICAL_DATA_RETENTION})
+ * @param {number} [nowMs=Date.now()]
+ * @returns {object[]} `{ timestamp, data }[]` sorted by `timestamp` ascending
+ */
+export function buildSnapshotsFromHistoricalHourly(batchResults, retentionMs, nowMs = Date.now()) {
+    if (!batchResults || batchResults.length === 0) {
+        return [];
+    }
+
+    const successful = batchResults.filter(
+        (r) => r && r.success && Array.isArray(r.hourly) && r.hourly.length > 0
+    );
+    if (successful.length !== batchResults.length) {
+        return [];
+    }
+
+    const toHourMap = (hourly) => {
+        const m = new Map();
+        for (const row of hourly) {
+            const ts = Number(row.timestamp);
+            if (Number.isFinite(ts)) {
+                m.set(ts, row);
+            }
+        }
+        return m;
+    };
+
+    const maps = successful.map((r) => toHourMap(r.hourly));
+    let common = new Set(maps[0].keys());
+    for (let i = 1; i < maps.length; i++) {
+        const next = new Set();
+        for (const t of common) {
+            if (maps[i].has(t)) {
+                next.add(t);
+            }
+        }
+        common = next;
+    }
+
+    const minT = nowMs - retentionMs;
+    const times = Array.from(common)
+        .filter((t) => t >= minT && t <= nowMs)
+        .sort((a, b) => a - b);
+
+    if (times.length === 0) {
+        return [];
+    }
+
+    return times.map((t) => ({
+        timestamp: t,
+        data: successful.map((r, idx) => {
+            const row = maps[idx].get(t);
+            return {
+                pointId: r.pointId,
+                latitude: r.latitude,
+                longitude: r.longitude,
+                success: true,
+                temperature: row.temperature,
+                feelsLike: row.feelsLike,
+                humidity: row.humidity,
+                pressure: row.pressure,
+                windSpeed: row.windSpeed,
+                windDirection: row.windDirection,
+                windGust: row.windGust,
+                precipitation: row.precipitation,
+                weather: row.weather,
+                weatherDescription: row.weatherDescription,
+                source: row.source
+            };
+        })
+    }));
+}
+
+/**
  * Get snapshot at specific timestamp
  */
 export function getSnapshotAtTime(snapshots, targetTimestamp) {

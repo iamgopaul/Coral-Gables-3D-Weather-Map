@@ -14,7 +14,7 @@ How to **use** the app in a browser. For installation and developer setup, see *
 - **View mode** — Choose what the map shows:
     - **Current** — Latest merged weather for stations and the interpolated grid.
     - **Forecast (3h / 24h)** — Conditions near **about 3 hours** or **about 24 hours** from now (nearest forecast time step from the APIs).
-    - **Historical** — Playback of **saved snapshots** from this browser (requires data already collected while using the app).
+    - **Historical** — Playback across roughly the **last 48 hours**. The app usually loads **hourly weather** from **Open-Meteo** for each station (so you do not need to leave the app running for days). If that request fails, it uses **snapshots** previously saved in this browser during refreshes.
     - **Split-screen compare** — Two panes side by side with different sources or times (camera stays linked).
 - **Refresh** — Fetches **current** weather again (and loads forecast data if needed). A **green sweep** animation may run across the map while data loads.
 - **Grid look** — Visual style for the grid (e.g. Gulf Glass, Basic Grid, Tidefield Membrane), where available in the UI.
@@ -42,7 +42,7 @@ How to **use** the app in a browser. For installation and developer setup, see *
 ## Data and privacy (short)
 
 - Weather is fetched from **public weather APIs**; see **`API.md`** for providers.
-- **Historical playback** uses data stored **in your browser** (IndexedDB) for this site — it is not uploaded to a project server by default.
+- **Historical playback** primarily loads **Open-Meteo** hourly data in your browser when you choose that mode (same public API as other parts of the app). **IndexedDB** may hold older refresh snapshots for **fallback**; that data stays on your device and is not uploaded to a project server by default.
 
 ## Limitations
 
@@ -56,7 +56,7 @@ How to **use** the app in a browser. For installation and developer setup, see *
 | --------------------- | ------------------------------------------------------------------------------------------------------- |
 | Blank or gray 3D view | Confirm the URL starts with `http://` or `https://`, not `file://`. Reload. Check network connection.   |
 | No weather numbers    | Use **Refresh**; check that APIs are reachable (some networks block requests).                          |
-| Historical empty      | The app must run for a while to **collect** snapshots; old data may expire per retention settings.      |
+| Historical empty      | Check **network** access to **Open-Meteo**; try **Refresh** on **Current** then open **Historical** again. If offline or blocked, the app only has **IndexedDB** snapshots from past sessions (may be sparse). |
 | Performance           | Close other heavy tabs; try a smaller window or lower scene quality if your build exposes that setting. |
 
 For developers: **`../README.md`** (Troubleshooting) and **`DEPLOY.md`** (hosting).
