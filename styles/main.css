@@ -901,20 +901,54 @@ select.lighting-test-hud-select option {
     color: var(--ui-accent-hover);
 }
 
-/* Data Source Status */
-#dataSource {
-    padding: 6px;
+/* Data + station status block */
+.data-status {
+    padding: 8px 10px;
     background: rgba(0, 0, 0, 0.22);
     border: 1px solid var(--ui-border);
-    border-radius: 4px;
-    text-align: center;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.data-status__line,
+.data-status__stations {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.data-status__label {
     font-size: 10px;
-    color: var(--ui-text-muted);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ui-text-dim);
+    flex: 0 0 auto;
+}
+
+.data-status__value {
+    font-size: 11px;
+    font-weight: 650;
+    color: var(--ui-accent-hover);
+    text-align: right;
+    flex: 1 1 auto;
+}
+
+/* Keep IDs for JS updates, but style via the new block */
+#dataSource {
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    text-align: left;
 }
 
 #sourceStatus {
-    font-weight: 600;
-    color: var(--ui-accent-hover);
+    font: inherit;
+    color: inherit;
 }
 
 #lastUpdate {
@@ -939,10 +973,7 @@ select.lighting-test-hud-select option {
 }
 
 .data-quality {
-    margin-top: 3px;
-    text-align: center;
-    color: var(--ui-text-dim);
-    font-size: 9px;
+    display: none;
 }
 
 #splitScreenControls {
@@ -1013,13 +1044,15 @@ select.lighting-test-hud-select option {
     font-weight: 600;
 }
 
-.api-sources {
-    margin-left: 6px;
-    color: var(--ui-text-dim);
-    font-size: 11px;
+.api-sources,
+.data-status__apis {
+    color: var(--ui-text-muted);
+    font-size: 10.5px;
     font-weight: 600;
+    line-height: 1.35;
     letter-spacing: 0.01em;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 /* Weather alert toasts — top center of framed map (offset for left Weather Menu) */

@@ -207,10 +207,19 @@
             
             <!-- Data Source Status -->
             <div class="control-group">
-                <div id="dataSource">Data: <span id="sourceStatus">Initializing…</span></div>
-                <div id="apiSources" class="api-sources"></div>
-                <div class="data-quality">
-                    <small>Stations: <span id="successCount">0</span> ok · <span id="failedCount">0</span> failed · <span id="stationTotal">17</span> total</small>
+                <div class="data-status">
+                    <div id="dataSource" class="data-status__line">
+                        <span class="data-status__label">Data</span>
+                        <span class="data-status__value" id="sourceStatus">Initializing…</span>
+                    </div>
+                    <div id="apiSources" class="data-status__apis" aria-label="Active API sources"></div>
+                    <div class="data-status__stations" aria-label="Station fetch status">
+                        <span class="data-status__label">Stations</span>
+                        <span class="data-status__value">
+                            <span id="successCount">0</span> ok · <span id="failedCount">0</span> failed ·
+                            <span id="stationTotal">17</span> total
+                        </span>
+                    </div>
                 </div>
             </div>
             </div>
