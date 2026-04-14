@@ -81,7 +81,6 @@ The app is meant to give residents, students, and curious users a **spatial** vi
 | `DEPLOY.md`       | Static hosting checklist                     |
 | `CONTRIBUTING.md` | Issues, PRs, checks                          |
 | `SECURITY.md`     | Client-side keys, reporting                  |
-| `CHANGELOG.md`    | Release history                              |
 | `ARCHITECTURE.md` | Data flow and modules                        |
 
 ---

@@ -31,7 +31,6 @@ All project docs live under **`docs/`** (except this file). On GitHub, browsing 
 | [`docs/DEPLOY.md`](docs/DEPLOY.md)             | Static hosting and build-time env vars       |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Issues, PRs, local checks                    |
 | [`docs/SECURITY.md`](docs/SECURITY.md)         | Client-side keys, reporting concerns         |
-| [`docs/CHANGELOG.md`](docs/CHANGELOG.md)       | Release history                              |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Code layout and data flow                    |
 
 ## Project layout
@@ -46,7 +45,7 @@ coral-gables-weather-grid/
 ├── package.json
 ├── .env.example            # Copy → `.env` for API keys (see `.gitignore`; example file is tracked)
 ├── tests/                  # Vitest: time helpers, NOAA wind, IDW, weatherService merge
-├── docs/                   # Description, API, USER_MANUAL, DEPLOY, CONTRIBUTING, SECURITY, CHANGELOG, ARCHITECTURE
+├── docs/                   # Description, API, USER_MANUAL, DEPLOY, CONTRIBUTING, SECURITY, ARCHITECTURE
 ├── .github/workflows/ci.yml
 ├── styles/main.css
 ├── js/

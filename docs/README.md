@@ -10,7 +10,6 @@ Project guides live in this folder. On GitHub, open the **`docs/`** directory in
 | [`DEPLOY.md`](DEPLOY.md)             | Static hosting and build-time env vars       |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Issues, PRs, local checks                    |
 | [`SECURITY.md`](SECURITY.md)         | Client-side keys, reporting concerns         |
-| [`CHANGELOG.md`](CHANGELOG.md)       | Release history                              |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Code layout and data flow                    |
 
 For setup, stack, and developer commands, see the root **[`README.md`](../README.md)**.
