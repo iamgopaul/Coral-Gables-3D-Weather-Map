@@ -456,8 +456,11 @@ export async function fetchBatchHistoricalHourly(samplingPoints, onProgress = nu
         return [];
     }
 
-    const concurrency = Math.max(1, Math.min(Number(CONFIG.WEATHER_BATCH_CONCURRENCY) || 6, n));
-    const waveGap = Number(CONFIG.WEATHER_BATCH_WAVE_GAP_MS) || 0;
+    const concurrency = Math.max(
+        1,
+        Math.min(Number(CONFIG.HISTORICAL_HOURLY_CONCURRENCY) || 2, n)
+    );
+    const waveGap = Number(CONFIG.HISTORICAL_HOURLY_WAVE_GAP_MS) || 0;
     const results = new Array(n);
     let completed = 0;
 

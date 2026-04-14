@@ -1,0 +1,11 @@
+# Netlify: avoid long-lived CDN cache of the HTML shell (it references hashed JS/CSS).
+# Without this, users can keep loading an old index.html that points at removed assets.
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

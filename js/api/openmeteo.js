@@ -3,6 +3,30 @@
  * No API key required, rate limit friendly
  */
 
+const OPEN_METEO_MAX_ATTEMPTS = 4;
+
+/**
+ * Fair-use: retry on HTTP 429 with backoff (and optional Retry-After).
+ * @param {string} url
+ * @returns {Promise<Response>}
+ */
+async function openMeteoFetch(url) {
+    for (let attempt = 0; attempt < OPEN_METEO_MAX_ATTEMPTS; attempt++) {
+        const response = await fetch(url);
+        if (response.status === 429 && attempt < OPEN_METEO_MAX_ATTEMPTS - 1) {
+            let delayMs = 700 * 2 ** attempt;
+            const ra = response.headers.get('Retry-After');
+            if (ra && /^\d+$/.test(ra.trim())) {
+                delayMs = Math.max(delayMs, parseInt(ra.trim(), 10) * 1000);
+            }
+            await new Promise((r) => setTimeout(r, delayMs));
+            continue;
+        }
+        return response;
+    }
+    throw new Error('Open-Meteo fetch: exhausted retries');
+}
+
 /**
  * Fetch current weather from Open-Meteo
  */
@@ -10,7 +34,7 @@ export async function fetchCurrentWeather(latitude, longitude) {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,cloud_cover,visibility&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
 
     try {
-        const response = await fetch(url);
+        const response = await openMeteoFetch(url);
 
         if (!response.ok) {
             throw new Error(`Open-Meteo API error: ${response.status}`);
@@ -90,7 +114,7 @@ export async function fetchForecast(latitude, longitude) {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=3`;
 
     try {
-        const response = await fetch(url);
+        const response = await openMeteoFetch(url);
 
         if (!response.ok) {
             throw new Error(`Open-Meteo Forecast API error: ${response.status}`);
@@ -151,7 +175,7 @@ export async function fetchHourlyPastWindow(latitude, longitude) {
         `&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl` +
         `&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=UTC&past_days=2&forecast_days=0`;
 
-    const response = await fetch(url);
+    const response = await openMeteoFetch(url);
 
     if (!response.ok) {
         throw new Error(`Open-Meteo hourly API error: ${response.status}`);

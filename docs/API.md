@@ -69,7 +69,7 @@ The **historical playback** path uses **`timezone=UTC`** so every sampling point
 
 - **Trust**: Reputable **open** service with documented models; **not** a government official forecast in the U.S. sense.
 - **Accuracy**: Depends on underlying models (often ECMWF/GFS-class inputs). Typically good for **synoptic** patterns; local effects (sea breeze, urban heat) may differ from a nearby ASOS station.
-- **Limits**: **No API key** for the public endpoint; fair-use / rate limits apply. Uptime is generally good but not contractually guaranteed.
+- **Limits**: **No API key** for the public endpoint; fair-use / rate limits apply (HTTP **429** if too many parallel requests). The app retries 429 with backoff and spaces **historical hourly** fetches (`HISTORICAL_HOURLY_*` in `config.js`). Uptime is generally good but not contractually guaranteed.
 
 ### Where it appears in the project
 

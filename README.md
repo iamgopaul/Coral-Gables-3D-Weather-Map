@@ -42,6 +42,8 @@ coral-gables-weather-grid/
 ├── eslint.config.js        # ESLint flat config
 ├── vitest.config.js        # Unit tests (Vitest)
 ├── package.json
+├── netlify.toml            # Optional Netlify headers: short cache on index.html, long on assets/
+├── vercel.json             # Optional Vercel headers (same idea)
 ├── .env.example            # Copy → `.env` for API keys (see `.gitignore`; example file is tracked)
 ├── tests/                  # Vitest: time helpers, NOAA wind, IDW, weatherService merge
 ├── docs/                   # Description, API, USER_MANUAL, DEPLOY, SECURITY, ARCHITECTURE
@@ -185,12 +187,13 @@ Modern Chromium / Firefox / Safari / Edge with **WebGL** and **IndexedDB**.
 
 ## Troubleshooting
 
-| Issue                      | What to try                                                                                                        |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Blank or stuck 3D view     | Confirm you’re on `http://localhost`, not `file://`. Check browser console and network (ArcGIS CDN + portal item). |
-| Weather errors             | Verify keys and endpoints in `config.js`; check console for which provider failed.                                 |
-| Split-screen fails to open | Wait until the main scene has finished loading; ensure forecast/history data exists if the chosen mode needs it.   |
-| Heavy scene                | Lower `SCENE_QUALITY_PROFILE` or grid resolution in `config.js`.                                                   |
+| Issue                                     | What to try                                                                                                                                                                                   |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Blank or stuck 3D view                    | Confirm you’re on `http://localhost`, not `file://`. Check browser console and network (ArcGIS CDN + portal item).                                                                            |
+| Weather errors                            | Verify keys and endpoints in `config.js`; check console for which provider failed.                                                                                                            |
+| Split-screen fails to open                | Wait until the main scene has finished loading; ensure forecast/history data exists if the chosen mode needs it.                                                                              |
+| **Deployed site looks like an old build** | Redeploy **full** `dist/` after `npm run build`, purge **CDN cache** for `/` and `index.html`, hard-refresh. See **[`docs/DEPLOY.md`](docs/DEPLOY.md)** → _Changes not showing after deploy_. |
+| Heavy scene                               | Lower `SCENE_QUALITY_PROFILE` or grid resolution in `config.js`.                                                                                                                              |
 
 ## License / credits
 

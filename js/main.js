@@ -4383,7 +4383,7 @@ function debugLog(message, isError = false) {
     } else {
         console.log(line);
     }
-    if (typeof fetch === 'undefined') {
+    if (typeof fetch === 'undefined' || !import.meta.env.DEV) {
         return;
     }
     fetch('/__debug_log', {
@@ -4392,7 +4392,7 @@ function debugLog(message, isError = false) {
         body: JSON.stringify({ line, isError }),
         keepalive: true
     }).catch(() => {
-        /* no local server or static host — ignore */
+        /* no local dev server — ignore */
     });
 }
 

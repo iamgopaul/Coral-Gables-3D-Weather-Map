@@ -168,6 +168,12 @@ export const CONFIG = {
 
     // Historical Data Configuration
     HISTORICAL_DATA_RETENTION: 48 * 60 * 60 * 1000, // 48 hours
+    /**
+     * Open-Meteo hourly backfill for playback: keep concurrency low and space waves so bursts
+     * (current + forecast + historical) stay under fair-use limits and avoid HTTP 429.
+     */
+    HISTORICAL_HOURLY_CONCURRENCY: 2,
+    HISTORICAL_HOURLY_WAVE_GAP_MS: 450,
 
     // Temperature Visualization Configuration
     /** @deprecated for live grid — main view uses relief mapping below */
