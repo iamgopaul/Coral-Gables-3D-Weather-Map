@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Local dev: http-server defaults to Cache: 3600s; avoid stale ES module / JS during iteration -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>Coral Gables 3D Weather Grid</title>
+    <!-- First-paint: hide UI removed by config before styles/main.css loads (stops FOUC on cold load) -->
+    <style id="app-critical-shell">
+        .hidden { display: none !important; }
+        #lightingTestHud:not(.lighting-test-hud--visible) {
+            display: none !important;
+            visibility: hidden !important;
+        }
+        #esriWeatherWidgetHost:not(.esri-weather-widget-host--visible) {
+            position: absolute !important;
+            width: 0 !important;
+            height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+            clip: rect(0, 0, 0, 0) !important;
+            border: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
+    </style>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="favicon.ico" sizes="any">
+    <link rel="preconnect" href="https://js.arcgis.com" crossorigin>
+    <link rel="dns-prefetch" href="https://js.arcgis.com">
+    
+    <!-- ArcGIS API for JavaScript 4.x -->
+    <link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/light/main.css">
+    <link rel="stylesheet" href="styles/main.css?v=cg5">
+</head>
+<body>
+    <div id="app">
+        <!-- Main 3D View Container -->
+        <div id="viewDiv"></div>
+        
+        <!-- Split View Container (hidden by default) -->
+        <div id="splitViewContainer" class="hidden split-container">
+            <div id="leftView" class="split-view"></div>
+            <div id="rightView" class="split-view"></div>
+        </div>
+        
+        <!-- Control Panel -->
+        <div id="controlPanel" class="panel panel--collapsible">
+            <div class="panel-header">
+                <h2 id="controlPanelTitle">🌡️ Controls</h2>
+                <button type="button" class="panel-minimize-btn" id="controlPanelMinBtn" aria-expanded="true" aria-controls="controlPanelBody" title="Hide controls">−</button>
+            </div>
+            <div id="controlPanelBody" class="panel-body">
+            <div class="control-group" style="background: #e3f2fd; padding: 6px; border-radius: 4px; margin-bottom: 10px;">
+                <small style="color: #1976d2; line-height: 1.3; font-size: 10px;">
+                    💡 Click grid cells for details
+                </small>
+            </div>
+            
+            <!-- Scene atmosphere: time-of-day + rain (Esri sun + weather) -->
+            <div id="lightingTestHud" class="control-group lighting-test-hud lighting-test-hud--panel" aria-label="Scene atmosphere" hidden>
+                <label for="sceneTimePresetSelect">Time of day</label>
+                <select id="sceneTimePresetSelect" class="lighting-test-hud-select">
+                    <option value="live">Live (real clock)</option>
+                    <option value="morning">Morning</option>
+                    <option value="midday">Midday</option>
+                    <option value="evening">Evening</option>
+                    <option value="night">Night</option>
+                </select>
+                <label for="sceneWeatherSelect">Weather</label>
+                <select id="sceneWeatherSelect" class="lighting-test-hud-select" title="Matches ArcGIS scene weather presets (SunnyWeather … FoggyWeather)">
+                    <option value="sunny">Sunny</option>
+                    <option value="cloudy">Cloudy</option>
+                    <option value="rainy">Rainy</option>
+                    <option value="snowy">Snowy</option>
+                    <option value="foggy">Foggy</option>
+                </select>
+                <div id="lightingHudSimTime" class="lighting-test-hud-time">—</div>
+                <div id="lightingHudOffset" class="lighting-test-hud-offset"></div>
+            </div>
+            
+            <!-- Mode Selector -->
+            <div class="control-group">
+                <label>View Mode:</label>
+                <select id="modeSelector">
+                    <option value="current">Current Conditions</option>
+                    <option value="forecast-3h">3-Hour Forecast</option>
+                    <option value="forecast-24h">24-Hour Forecast</option>
+                    <option value="historical">Historical Playback</option>
+                    <option value="split-screen">Split-Screen Compare</option>
+                </select>
+            </div>
+            
+            <!-- Historical Playback Controls -->
+            <div id="playbackControls" class="control-group hidden">
+                <label>Timeline (Last 48 Hours):</label>
+                <input type="range" id="timelineSlider" min="0" max="100" value="100">
+                <div class="playback-buttons">
+                    <button id="playBtn">▶ Play</button>
+                    <button id="pauseBtn" class="hidden">⏸ Pause</button>
+                    <select id="speedSelector">
+                        <option value="1">1x</option>
+                        <option value="2" selected>2x</option>
+                        <option value="4">4x</option>
+                    </select>
+                </div>
+                <div id="currentTimestamp"></div>
+                <div class="timeline-info">
+                    <small>Snapshots: <span id="snapshotCount">0</span></small>
+                </div>
+            </div>
+            
+            <!-- Split-Screen Controls -->
+            <div id="splitScreenControls" class="control-group hidden">
+                <label>Left View:</label>
+                <select id="leftViewMode">
+                    <option value="current">Current</option>
+                    <option value="forecast-3h">3-Hr Forecast</option>
+                    <option value="forecast-24h">24-Hr Forecast</option>
+                    <option value="historical">24 Hours Ago</option>
+                </select>
+                
+                <label>Right View:</label>
+                <select id="rightViewMode">
+                    <option value="forecast-3h" selected>3-Hr Forecast</option>
+                    <option value="current">Current</option>
+                    <option value="forecast-24h">24-Hr Forecast</option>
+                    <option value="historical">24 Hours Ago</option>
+                </select>
+                
+                <button id="swapViews">⇄ Swap Views</button>
+            </div>
+            
+            <!-- Refresh Controls -->
+            <div class="control-group">
+                <button id="refreshBtn">🔄 Refresh Now</button>
+                <div id="lastUpdate">Last update: --:--</div>
+                <div id="nextUpdate" class="next-update">Next: <span id="nextUpdateTime">--</span></div>
+            </div>
+            
+            <!-- Layer Toggles -->
+            <div class="control-group">
+                <label>Display Layers:</label>
+                <div class="checkbox-group">
+                    <label><input type="checkbox" id="toggleGrid" checked> Grid Mesh</label>
+                    <label><input type="checkbox" id="togglePoints" checked> Sample Points</label>
+                    <label><input type="checkbox" id="toggleWind"> Wind Vectors</label>
+                    <label><input type="checkbox" id="toggleAlerts" checked> Weather Alerts</label>
+                </div>
+            </div>
+            
+            <!-- Animation Toggle -->
+            <div class="control-group">
+                <label><input type="checkbox" id="toggleAnimation" checked> Smooth Transitions</label>
+            </div>
+            
+            <!-- Data Source Status -->
+            <div class="control-group">
+                <div id="dataSource">Data: <span id="sourceStatus">Initializing...</span></div>
+                <div class="data-quality">
+                    <small>✓ <span id="successCount">0</span> | ✗ <span id="failedCount">0</span></small>
+                </div>
+            </div>
+            </div>
+        </div>
+        
+        <!-- Legend Panel -->
+        <div id="legendPanel" class="panel panel--collapsible">
+            <div class="panel-header panel-header--legend">
+                <h3 class="panel-header-title" id="legendPanelTitle">Temp &amp; legend</h3>
+                <button type="button" class="panel-minimize-btn" id="legendPanelMinBtn" aria-expanded="true" aria-controls="legendPanelBody" title="Hide legend">−</button>
+            </div>
+            <div id="legendPanelBody" class="panel-body">
+            <div id="coralGablesLive" class="coral-gables-live" aria-label="Current conditions at Coral Gables">
+                <h4>Coral Gables (live)</h4>
+                <div id="cgLiveTemp" class="cg-live-temp">--°F</div>
+                <p id="cgLiveCondition" class="cg-live-condition">—</p>
+                <small id="cgLiveSource" class="cg-live-source"></small>
+            </div>
+            <h3>Temperature Scale</h3>
+            <div id="tempGradient" class="gradient-bar"></div>
+            <div class="scale-labels">
+                <span id="minTemp">--°F</span>
+                <span id="maxTemp">--°F</span>
+            </div>
+            <div class="elevation-scale">
+                <p>Height = Temperature</p>
+                <small>Warmer areas rise higher</small>
+            </div>
+            <div class="mode-display">
+                <strong>Mode: <span id="currentModeText">Current</span></strong>
+            </div>
+            </div>
+        </div>
+        
+        <!-- Alert Banner -->
+        <div id="alertBanner" class="alert-banner hidden">
+            <div id="alertContent"></div>
+            <button id="dismissAlert">✕</button>
+        </div>
+        
+        <!-- Loading Indicator -->
+        <div id="loadingIndicator" class="hidden">
+            <div class="spinner"></div>
+            <p id="loadingMessage">Loading weather data...</p>
+        </div>
+        
+        <!-- Headless Esri Weather widget mount (styled via #app-critical-shell until JS adds classes) -->
+        <div id="esriWeatherWidgetHost" aria-hidden="true"></div>
+
+        <!-- Debug Console (Press 'D' to toggle) -->
+        <div id="debugConsole" class="debug-console">
+            <div class="debug-header">
+                <strong>Debug Console</strong>
+                <small>(Press 'D' to toggle)</small>
+            </div>
+            <div id="debugOutput"></div>
+        </div>
+    </div>
+    
+    <!-- ArcGIS API -->
+    <script src="https://js.arcgis.com/4.29/"></script>
+    
+    <!-- Application Modules (v= cache-bust so first navigation matches refresh after deploy) -->
+    <script type="module" src="js/main.js?v=cg7"></script>
+</body>
+</html>

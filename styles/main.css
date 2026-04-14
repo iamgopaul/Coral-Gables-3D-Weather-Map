@@ -1,0 +1,771 @@
+/* Base Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow: hidden;
+}
+
+#app {
+    width: 100vw;
+    height: 100vh;
+    position: relative;
+}
+
+/* 3D View Container */
+#viewDiv {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+    cursor: pointer;
+    outline: none;
+}
+
+/* Esri Weather widget host (see CONFIG.SCENE_ESRI_WEATHER_WIDGET) */
+.esri-weather-widget-host.esri-weather-widget-host--visible {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    z-index: 40;
+    max-width: min(280px, 90vw);
+}
+
+/* Manual scene HUD — only shown when JS adds .lighting-test-hud--visible (see CONFIG.SCENE_LIGHTING_TEST_HUD) */
+#lightingTestHud.lighting-test-hud--visible {
+    display: block !important;
+    visibility: visible !important;
+}
+
+/* Scene lighting test — inside #controlPanel (not over map; avoids WebGL/legend stacking) */
+.lighting-test-hud--panel {
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 6px;
+    padding: 8px 10px !important;
+    border: 1px solid #334155;
+    border-left: 4px solid #f97316;
+    margin-bottom: 10px !important;
+}
+
+.lighting-test-hud--panel > label {
+    display: block;
+    font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-size: 10px;
+    margin-bottom: 6px;
+}
+
+.lighting-test-hud-time {
+    font-size: 14px;
+    font-weight: 600;
+    color: #f8fafc;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 4px;
+}
+
+.lighting-test-hud-offset {
+    color: #94a3b8;
+    margin-bottom: 0;
+    line-height: 1.3;
+    font-size: 10px;
+}
+
+.lighting-test-hud--panel .lighting-test-hud-select {
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    font-size: 11px;
+    border-radius: 4px;
+    border: 1px solid #475569;
+    background: #1e293b;
+    color: #f1f5f9;
+}
+
+.lighting-test-hud--panel label {
+    margin-top: 4px;
+}
+
+/* Split-Screen Container */
+.split-container {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 5;
+    display: flex;
+    gap: 2px;
+    background: #333;
+}
+
+.split-view {
+    flex: 1;
+    height: 100%;
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+}
+
+/* Main SceneView fills the left split cell when #viewDiv is reparented here */
+#leftView #viewDiv {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* Right split pane: in-flow sizing (#rightView is also .split-view); SceneView fills this box. */
+#rightView {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+}
+
+.split-container .split-view::before {
+    content: attr(data-label);
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 4px;
+    z-index: 10;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+/* Panel Styles */
+.panel {
+    position: absolute;
+    background: rgba(255, 255, 255, 0.96);
+    border-radius: 6px;
+    padding: 12px;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+    z-index: 10;
+    font-size: 12px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+/* Collapsible panel chrome */
+.panel--collapsible .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.panel--collapsible:not(.panel--minimized) .panel-header {
+    margin-bottom: 10px;
+}
+
+.panel-header--legend .panel-header-title {
+    margin: 0;
+    font-size: 0.95em;
+    font-weight: 600;
+    color: #2c3e50;
+    flex: 1;
+    min-width: 0;
+    line-height: 1.3;
+}
+
+.panel-minimize-btn {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    background: #f8fafc;
+    color: #334155;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.panel-minimize-btn:hover {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+}
+
+.panel-minimize-btn:focus-visible {
+    outline: 2px solid #3498db;
+    outline-offset: 2px;
+}
+
+.panel--minimized .panel-body {
+    display: none !important;
+}
+
+.panel--collapsible.panel--minimized {
+    max-height: none !important;
+    overflow: visible;
+}
+
+/* Control Panel - Compact Top Bar */
+#controlPanel {
+    top: 10px;
+    left: 10px;
+    width: 220px;
+    max-height: calc(100vh - 350px);
+    overflow-y: auto;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    z-index: 10;
+}
+
+/* Custom scrollbar for control panel */
+#controlPanel::-webkit-scrollbar {
+    width: 6px;
+}
+
+#controlPanel::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 3px;
+}
+
+#controlPanel::-webkit-scrollbar-thumb {
+    background: #3498db;
+    border-radius: 3px;
+}
+
+#controlPanel::-webkit-scrollbar-thumb:hover {
+    background: #2980b9;
+}
+
+/* Custom scrollbar for legend panel */
+#legendPanel::-webkit-scrollbar {
+    width: 6px;
+}
+
+#legendPanel::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 3px;
+}
+
+#legendPanel::-webkit-scrollbar-thumb {
+    background: #3498db;
+    border-radius: 3px;
+}
+
+#legendPanel::-webkit-scrollbar-thumb:hover {
+    background: #2980b9;
+}
+
+/* Live Coral Gables readout (NWS-prioritized merge) */
+.coral-gables-live {
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.coral-gables-live h4 {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #64748b;
+    margin: 0 0 6px 0;
+}
+
+.cg-live-temp {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+}
+
+.cg-live-condition {
+    margin: 4px 0 2px 0;
+    font-size: 12px;
+    color: #334155;
+    line-height: 1.35;
+}
+
+.cg-live-source {
+    display: block;
+    color: #94a3b8;
+    font-size: 9px;
+    line-height: 1.3;
+}
+
+#controlPanel .panel-header h2 {
+    font-size: 1.1em;
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+    color: #2c3e50;
+    border-bottom: none;
+    padding-bottom: 0;
+    line-height: 1.25;
+}
+
+#controlPanel:not(.panel--minimized) .panel-header {
+    border-bottom: 2px solid #3498db;
+    padding-bottom: 6px;
+}
+
+.control-group {
+    margin-bottom: 12px;
+}
+
+.control-group label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: #34495e;
+    font-size: 11px;
+}
+
+.control-group select,
+.control-group button {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.control-group button {
+    background: #3498db;
+    color: white;
+    border: none;
+    font-weight: 600;
+}
+
+.control-group button:hover {
+    background: #2980b9;
+}
+
+/* Checkbox Group */
+.checkbox-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.checkbox-group label {
+    display: flex;
+    align-items: center;
+    font-weight: 400;
+    cursor: pointer;
+    font-size: 11px;
+}
+
+.checkbox-group input[type="checkbox"] {
+    margin-right: 6px;
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+}
+
+/* Playback Controls */
+#playbackControls {
+    border: 1px solid #e0e0e0;
+    padding: 15px;
+    border-radius: 6px;
+    background: #f9f9f9;
+}
+
+#timelineSlider {
+    width: 100%;
+    margin: 10px 0;
+    cursor: pointer;
+}
+
+.playback-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.playback-buttons button,
+.playback-buttons select {
+    flex: 1;
+    padding: 8px;
+}
+
+#currentTimestamp {
+    margin-top: 10px;
+    text-align: center;
+    font-weight: 600;
+    color: #3498db;
+}
+
+/* Data Source Status */
+#dataSource {
+    padding: 6px;
+    background: #ecf0f1;
+    border-radius: 4px;
+    text-align: center;
+    font-size: 10px;
+}
+
+#sourceStatus {
+    font-weight: 600;
+    color: #27ae60;
+}
+
+#lastUpdate {
+    margin-top: 4px;
+    text-align: center;
+    font-size: 10px;
+    color: #7f8c8d;
+}
+
+.next-update {
+    margin-top: 2px;
+    text-align: center;
+    font-size: 9px;
+    color: #95a5a6;
+}
+
+.timeline-info {
+    margin-top: 4px;
+    text-align: center;
+    color: #7f8c8d;
+    font-size: 9px;
+}
+
+.data-quality {
+    margin-top: 3px;
+    text-align: center;
+    color: #7f8c8d;
+    font-size: 9px;
+}
+
+#splitScreenControls {
+    border: 1px solid #e0e0e0;
+    padding: 10px;
+    border-radius: 4px;
+    background: #f9f9f9;
+}
+
+#splitScreenControls button {
+    margin-top: 6px;
+    font-size: 10px;
+}
+
+/* Legend Panel - Absolutely Positioned Bottom Left */
+#legendPanel {
+    position: absolute !important;
+    bottom: 10px !important;
+    left: 10px !important;
+    width: 200px !important;
+    z-index: 10 !important;
+    padding: 10px !important;
+    margin: 0 !important;
+    max-height: 280px;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    display: block !important;
+    visibility: visible !important;
+}
+
+#legendPanel.panel--minimized {
+    max-height: none;
+    overflow: visible;
+}
+
+#legendPanel:not(.panel--minimized) .panel-header--legend {
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+#legendPanel h3 {
+    font-size: 0.9em;
+    margin-bottom: 8px;
+    color: #2c3e50;
+    font-weight: 600;
+}
+
+.gradient-bar {
+    height: 24px;
+    background: linear-gradient(to right, 
+        #0000ff 0%,
+        #00ffff 25%,
+        #00ff00 50%,
+        #ffff00 75%,
+        #ff0000 100%
+    );
+    border-radius: 4px;
+    margin-bottom: 8px;
+}
+
+.scale-labels {
+    display: flex;
+    justify-content: space-between;
+    font-weight: 600;
+    color: #34495e;
+    font-size: 10px;
+    margin-top: 4px;
+}
+
+.elevation-scale {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #e0e0e0;
+}
+
+.elevation-scale p {
+    font-weight: 600;
+    margin-bottom: 2px;
+    font-size: 10px;
+}
+
+.elevation-scale small {
+    color: #7f8c8d;
+    font-size: 9px;
+}
+
+.mode-display {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #e0e0e0;
+    text-align: center;
+    font-size: 10px;
+}
+
+.mode-display span {
+    color: #3498db;
+    font-weight: 600;
+}
+
+/* Alert Banner - Top Right */
+.alert-banner {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    max-width: 280px;
+    background: rgba(220, 53, 69, 0.96);
+    color: white;
+    padding: 10px 30px 10px 12px;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    z-index: 500;
+    font-size: 11px;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.alert-banner.warning {
+    background: #f39c12;
+}
+
+.alert-banner.advisory {
+    background: #f1c40f;
+    color: #2c3e50;
+}
+
+#alertContent {
+    font-weight: 600;
+}
+
+#dismissAlert {
+    position: absolute;
+    top: 10px;
+    right: 15px;
+    background: none;
+    border: none;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0;
+    width: auto;
+}
+
+/* Loading Indicator */
+#loadingIndicator {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(255, 255, 255, 0.96);
+    padding: 20px;
+    border-radius: 6px;
+    text-align: center;
+    z-index: 1000;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+    font-size: 12px;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #3498db;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 10px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Utility Classes */
+.hidden {
+    display: none !important;
+}
+
+/* ArcGIS Popup Override - Make it appear at click location, not docked */
+.esri-popup {
+    z-index: 9999 !important;
+}
+
+.esri-popup__main-container {
+    z-index: 10000 !important;
+    max-width: 300px !important;
+}
+
+.esri-popup--is-docked {
+    position: absolute !important;
+}
+
+/* Force popup to appear at clicked location */
+.esri-view-root .esri-popup {
+    position: absolute !important;
+}
+
+/* ArcGIS UI widgets positioning */
+.esri-ui-corner .esri-component {
+    z-index: 20 !important;
+    margin: 8px !important;
+}
+
+.esri-zoom {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3) !important;
+}
+
+.esri-compass {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3) !important;
+}
+
+.esri-navigation-toggle {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3) !important;
+}
+
+.esri-home {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Debug Console - Bottom Right */
+.debug-console {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    width: 350px;
+    max-height: 200px;
+    background: rgba(0, 0, 0, 0.9);
+    color: #ffffff;
+    border: 1px solid #00d4ff;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    z-index: 15;
+    overflow: hidden;
+}
+
+.debug-header {
+    background: rgba(0, 150, 200, 0.2);
+    padding: 6px 10px;
+    border-bottom: 1px solid #00d4ff;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+}
+
+.debug-header strong {
+    color: #00d4ff;
+}
+
+.debug-header small {
+    color: #88ccff;
+}
+
+#debugOutput {
+    padding: 10px;
+    max-height: 160px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    color: #ffffff;
+    line-height: 1.4;
+    word-wrap: break-word;
+}
+
+#debugOutput::-webkit-scrollbar {
+    width: 8px;
+}
+
+#debugOutput::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.5);
+}
+
+#debugOutput::-webkit-scrollbar-thumb {
+    background: #00d4ff;
+    border-radius: 4px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    #controlPanel {
+        width: calc(50% - 15px);
+        max-height: 50vh;
+        left: 10px;
+        font-size: 10px;
+    }
+    
+    #legendPanel {
+        width: calc(50% - 15px);
+        left: auto;
+        right: 10px;
+        bottom: 10px;
+    }
+    
+    .alert-banner {
+        max-width: calc(100% - 20px);
+        right: 10px;
+        top: 10px;
+        font-size: 10px;
+    }
+    
+    .debug-console {
+        width: calc(100% - 20px);
+        left: 10px;
+        bottom: 10px;
+        max-height: 150px;
+    }
+}
