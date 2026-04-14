@@ -6,13 +6,13 @@ This document describes **external services** the app calls from the browser, ho
 
 ## Summary
 
-| API / service                        | Auth                              | Primary role in this app                                                                              |
-| ------------------------------------ | --------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| **api.weather.gov** (NWS)            | None; `User-Agent` required       | US station observations, hourly forecast, **active alerts**; often preferred for “live” US conditions |
+| API / service                        | Auth                              | Primary role in this app                                                                                           |
+| ------------------------------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **api.weather.gov** (NWS)            | None; `User-Agent` required       | US station observations, hourly forecast, **active alerts**; often preferred for “live” US conditions              |
 | **Open-Meteo**                       | None (`api.open-meteo.com`)       | Global current + forecast; **hourly past window** for historical playback; **always** used when other sources fail |
-| **OpenWeatherMap**                   | API key (`VITE_*`)                | Optional third source for current + 5‑day/3‑h forecast                                                |
-| **ArcGIS / Esri**                    | Optional API key; public WebScene | 3D map, scene, **Maps SDK** loaded from CDN                                                           |
-| **Vite dev server** (`/__debug_log`) | Local only                        | Forwards browser logs to the terminal during `npm run dev` / `preview` — not a weather API            |
+| **OpenWeatherMap**                   | API key (`VITE_*`)                | Optional third source for current + 5‑day/3‑h forecast                                                             |
+| **ArcGIS / Esri**                    | Optional API key; public WebScene | 3D map, scene, **Maps SDK** loaded from CDN                                                                        |
+| **Vite dev server** (`/__debug_log`) | Local only                        | Forwards browser logs to the terminal during `npm run dev` / `preview` — not a weather API                         |
 
 All weather **requests** are issued from the **user’s browser** (client-side `fetch`). API keys in `.env` are **inlined at build time** into the JS bundle; treat keys as **public** if you ship static hosting.
 
@@ -55,10 +55,10 @@ Headers: **`User-Agent`** is set from `CONFIG.NWS_USER_AGENT` (`js/config.js`), 
 
 ### Endpoints used
 
-| Flow                    | Base                                                         | Module                |
-| ----------------------- | ------------------------------------------------------------ | --------------------- |
-| Current conditions      | `GET https://api.open-meteo.com/v1/forecast?...&current=...` | `js/api/openmeteo.js` |
-| Hourly forecast (3‑day) | Same API with `hourly=...`                                   | `js/api/openmeteo.js` |
+| Flow                    | Base                                                                                     | Module                                          |
+| ----------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Current conditions      | `GET https://api.open-meteo.com/v1/forecast?...&current=...`                             | `js/api/openmeteo.js`                           |
+| Hourly forecast (3‑day) | Same API with `hourly=...`                                                               | `js/api/openmeteo.js`                           |
 | Hourly **past** window  | Same API with `hourly=...`, **`past_days=2`**, **`forecast_days=0`**, **`timezone=UTC`** | `js/api/openmeteo.js` (`fetchHourlyPastWindow`) |
 
 Parameters for current/forecast include **`temperature_unit=fahrenheit`**, **`wind_speed_unit=mph`**, **`timezone=auto`**. Forecast hourly series is **subsampled every 3 hours** in the parser when building the `forecasts` array (fewer periods than full hourly).

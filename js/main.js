@@ -1409,7 +1409,9 @@ async function hydrateHistoricalSnapshotsFromApi(options = {}) {
                 ? preservePlaybackIndex
                 : undefined
         );
-        debugLog(`✓ Historical playback: ${snapshots.length} hourly frames (past ${CONFIG.HISTORICAL_DATA_RETENTION / 3600000}h window)`);
+        debugLog(
+            `✓ Historical playback: ${snapshots.length} hourly frames (past ${CONFIG.HISTORICAL_DATA_RETENTION / 3600000}h window)`
+        );
         return true;
     } catch (e) {
         const msg = e && e.message ? e.message : String(e);

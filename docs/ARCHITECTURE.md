@@ -60,7 +60,7 @@ flowchart LR
 | `js/config.js`                                        | Constants: grid extent, API URLs, scene, refresh intervals                                                                                        |
 | `js/api/weatherService.js`                            | Merge priorities, batch fetches (`fetchBatchWeather`, `fetchBatchForecast`, `fetchBatchHistoricalHourly`), forecast selection + enrichment        |
 | `js/api/noaa.js`, `openmeteo.js`, `openweathermap.js` | Provider-specific `fetch` + parse (`openmeteo.js` includes hourly past window for historical playback)                                            |
-| `js/features/timeFeatures.js`                         | `getForecastData`, `buildSnapshotsFromHistoricalHourly`, `PlaybackController`, IndexedDB snapshot helpers                                           |
+| `js/features/timeFeatures.js`                         | `getForecastData`, `buildSnapshotsFromHistoricalHourly`, `PlaybackController`, IndexedDB snapshot helpers                                         |
 | `js/storage/db.js`                                    | IndexedDB read/write                                                                                                                              |
 | `js/viz/wind.js`                                      | Wind vectors and area-mean wind graphic                                                                                                           |
 | `js/utils/interpolation.js`                           | IDW and grid interpolation                                                                                                                        |
@@ -68,12 +68,12 @@ flowchart LR
 
 ## View modes (where logic splits)
 
-| Mode              | Data source                                                            | Typical entry in `main.js`                   |
-| ----------------- | ---------------------------------------------------------------------- | -------------------------------------------- |
-| Current           | Merged live `fetchBatchWeather` → `state.samplingPoints` / `gridCells` | `refreshWeatherData`, `updateVisualization`  |
-| Forecast 3h / 24h | `state.forecastData` + `TimeFeatures.getForecastData(..., hours)`      | `showForecast`, split helpers                |
+| Mode              | Data source                                                                                                                      | Typical entry in `main.js`                                                        |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Current           | Merged live `fetchBatchWeather` → `state.samplingPoints` / `gridCells`                                                           | `refreshWeatherData`, `updateVisualization`                                       |
+| Forecast 3h / 24h | `state.forecastData` + `TimeFeatures.getForecastData(..., hours)`                                                                | `showForecast`, split helpers                                                     |
 | Historical        | Prefer **Open-Meteo hourly** frames in `state.historicalSnapshots` (hydrated in `main.js`); else IndexedDB; `PlaybackController` | `hydrateHistoricalSnapshotsFromApi`, `rebindHistoricalPlaybackController`, slider |
-| Split-screen      | Combines two modes via `getSamplingPointsAndGridForSplitMode`          | `updateSplitVisualization`                   |
+| Split-screen      | Combines two modes via `getSamplingPointsAndGridForSplitMode`                                                                    | `updateSplitVisualization`                                                        |
 
 ## Testing
 

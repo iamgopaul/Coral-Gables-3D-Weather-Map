@@ -52,11 +52,11 @@ How to **use** the app in a browser. For installation and developer setup, see *
 
 ## Troubleshooting
 
-| Problem               | What to try                                                                                             |
-| --------------------- | ------------------------------------------------------------------------------------------------------- |
-| Blank or gray 3D view | Confirm the URL starts with `http://` or `https://`, not `file://`. Reload. Check network connection.   |
-| No weather numbers    | Use **Refresh**; check that APIs are reachable (some networks block requests).                          |
+| Problem               | What to try                                                                                                                                                                                                    |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Blank or gray 3D view | Confirm the URL starts with `http://` or `https://`, not `file://`. Reload. Check network connection.                                                                                                          |
+| No weather numbers    | Use **Refresh**; check that APIs are reachable (some networks block requests).                                                                                                                                 |
 | Historical empty      | Check **network** access to **Open-Meteo**; try **Refresh** on **Current** then open **Historical** again. If offline or blocked, the app only has **IndexedDB** snapshots from past sessions (may be sparse). |
-| Performance           | Close other heavy tabs; try a smaller window or lower scene quality if your build exposes that setting. |
+| Performance           | Close other heavy tabs; try a smaller window or lower scene quality if your build exposes that setting.                                                                                                        |
 
 For developers: **`../README.md`** (Troubleshooting) and **`DEPLOY.md`** (hosting).

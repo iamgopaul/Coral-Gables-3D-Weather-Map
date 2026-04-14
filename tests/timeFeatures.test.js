@@ -86,7 +86,10 @@ describe('buildSnapshotsFromHistoricalHourly', () => {
     it('returns empty when any station failed or hourly missing', () => {
         expect(
             buildSnapshotsFromHistoricalHourly(
-                [{ pointId: 'a', success: true, hourly: [{ timestamp: 1 }] }, { pointId: 'b', success: false }],
+                [
+                    { pointId: 'a', success: true, hourly: [{ timestamp: 1 }] },
+                    { pointId: 'b', success: false }
+                ],
                 48 * 3600000
             )
         ).toEqual([]);
