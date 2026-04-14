@@ -22,8 +22,25 @@ function readArcgisKey() {
     }
 }
 
+/**
+ * api.weather.gov requires a descriptive User-Agent; NWS asks for contact info for heavy use.
+ * Set `VITE_NWS_CONTACT_EMAIL` in `.env` to append it (helps with API reliability / support).
+ */
+function readNwsUserAgent() {
+    try {
+        const contact = String(import.meta.env.VITE_NWS_CONTACT_EMAIL ?? '').trim();
+        if (contact) {
+            return `CoralGablesWeatherGrid/1.0 (contact: ${contact})`;
+        }
+    } catch {
+        /* non-Vite host */
+    }
+    return 'CoralGablesWeatherGrid/1.0';
+}
+
 const OPENWEATHERMAP_API_KEY_FROM_ENV = readOpenWeatherMapKey();
 const ARCGIS_API_KEY_FROM_ENV = readArcgisKey();
+const NWS_USER_AGENT_FROM_ENV = readNwsUserAgent();
 
 export const CONFIG = {
     // ArcGIS Configuration
@@ -32,6 +49,8 @@ export const CONFIG = {
     /** Portal where the WebScene item lives (public scene — no sign-in required) */
     ARCGIS_PORTAL_URL: 'https://cggis.maps.arcgis.com',
     ARCGIS_API_KEY: ARCGIS_API_KEY_FROM_ENV,
+    /** Sent on every `api.weather.gov` request (points, observations, alerts). */
+    NWS_USER_AGENT: NWS_USER_AGENT_FROM_ENV,
 
     /**
      * SceneView rendering quality (`low` | `medium` | `high`).
@@ -133,7 +152,8 @@ export const CONFIG = {
     
     // Refresh Intervals (in milliseconds)
     WEATHER_REFRESH_INTERVAL: 2 * 60 * 1000, // 2 minutes
-    ALERT_REFRESH_INTERVAL: 2 * 60 * 1000,    // 2 minutes
+    /** NWS active-alerts poll — keep relatively frequent so the list stays current. */
+    ALERT_REFRESH_INTERVAL: 60 * 1000, // 1 minute
     
     // Historical Data Configuration
     HISTORICAL_DATA_RETENTION: 48 * 60 * 60 * 1000, // 48 hours
@@ -214,10 +234,38 @@ export const CONFIG = {
     DEFORMATION_ANIMATION_DURATION: 2000, // milliseconds
     PLAYBACK_SPEEDS: [1, 2, 4],
     
-    /** NWS alert toasts: auto-dismiss and max stacked pop-ups */
-    ALERT_TOAST_AUTO_DISMISS_MS: 9000,
-    ALERT_TOAST_MAX_VISIBLE: 3,
+    /**
+     * When station temps across the grid differ by at least `MICROCLIMATE_MIN_SPREAD_F`, occasionally
+     * toast which Coral Gables area is hotter/colder (sampling-point regions). Not used with sample-data.
+     */
+    MICROCLIMATE_TOAST_ENABLED: true,
+    /** °F difference (max−min among stations) to treat as drastic. */
+    MICROCLIMATE_MIN_SPREAD_F: 10,
+    /** 0–1: only some refreshes fire (keeps it occasional). */
+    MICROCLIMATE_TOAST_CHANCE: 0.38,
+    /** Min time between microclimate toasts (ms). */
+    MICROCLIMATE_TOAST_MIN_INTERVAL_MS: 8 * 60 * 1000,
+    /** Delay after refresh so it follows the welcome toast on first load (ms). */
+    MICROCLIMATE_TOAST_DELAY_MS: 3600,
+    /** Auto-dismiss for microclimate toast (ms). */
+    MICROCLIMATE_TOAST_AUTO_DISMISS_MS: 12000,
+    /** Friendly “good morning / dress for the weather” toast on first load (ms). */
+    WELCOME_TOAST_AUTO_DISMISS_MS: 14000,
+    /**
+     * NWS alert toasts: `0` = stay on screen until you dismiss or the alert expires from the API feed
+     * (stale toasts are removed automatically when NWS no longer returns them).
+     */
+    ALERT_TOAST_AUTO_DISMISS_MS: 0,
+    /** Max NWS toasts shown; `0` = show all active alerts. */
+    ALERT_TOAST_MAX_VISIBLE: 0,
     ALERT_TOAST_EXIT_MS: 420,
+    /**
+     * When station data suggests storm-level wind, rain, fog, or snow but NWS text does not already
+     * cover that hazard, show one extra “live conditions” toast (same strip as NWS).
+     */
+    LIVE_CONDITION_SUPPLEMENT_ENABLED: true,
+    /** `0` = live supplement stays until conditions or NWS coverage change. */
+    LIVE_CONDITION_SUPPLEMENT_AUTO_DISMISS_MS: 0,
 
     // Alert Thresholds
     TEMP_GRADIENT_THRESHOLD: 15, // °F difference across grid

@@ -5,7 +5,12 @@ import * as OpenMeteo from './openmeteo.js';
 
 /**
  * Unified weather service with intelligent multi-API merging
- * Pulls from OpenWeatherMap, Open-Meteo, and NOAA to get the best available data
+ * Pulls from OpenWeatherMap, Open-Meteo, and NOAA to get the best available data.
+ *
+ * **Units (after parse):** temperature °F, wind speed mph, wind gust mph, pressure ~mb,
+ * wind direction ° **meteorological** (direction the wind blows *from*, 0–360 clockwise from N).
+ * Open-Meteo requests `temperature_unit=fahrenheit&wind_speed_unit=mph`; OpenWeatherMap uses `units=imperial`;
+ * NOAA observations convert °C→°F and m/s→mph in `noaa.js`.
  */
 
 let warnedMissingOpenWeatherMapKey = false;
@@ -86,11 +91,8 @@ function mergeWeatherData(sources, mergePriority = MERGE_PRIORITY_DEFAULT) {
     });
     
     // Extract just the values and log sources
-    Object.keys(fieldScores).forEach(key => {
+    Object.keys(fieldScores).forEach((key) => {
         merged[key] = fieldScores[key].value;
-        if (key === 'weather' || key === 'weatherDescription' || key === 'visibility') {
-            console.log(`🔄 Using ${key}: "${merged[key]}" from ${fieldScores[key].source}`);
-        }
     });
     
     return merged;
@@ -126,7 +128,6 @@ export async function fetchCurrentWeather(latitude, longitude, options = {}) {
         const api = apiNames[index];
         if (result.status === 'fulfilled' && result.value) {
             sources.push(result.value);
-            console.log(`✓ ${api} returned:`, result.value);
         } else if (result.status === 'rejected') {
             console.warn(`✗ ${api} failed:`, result.reason?.message);
         }
@@ -142,8 +143,6 @@ export async function fetchCurrentWeather(latitude, longitude, options = {}) {
     // Add source info
     merged.sources = sources.map(s => s.source).join(', ');
     merged.source = sources.map(s => s.source).join(', ');
-    
-    console.log(`📊 Merged weather data:`, merged);
     
     return merged;
 }
@@ -191,7 +190,7 @@ export async function fetchForecast(latitude, longitude) {
 }
 
 /**
- * Fetch weather alerts (NOAA only)
+ * Fetch weather alerts (NOAA only). Resolves to `{ ok, alerts, error? }` — use `ok` to detect HTTP / parse failures vs. no active alerts.
  */
 export async function fetchWeatherAlerts(latitude, longitude) {
     return await NOAA.fetchWeatherAlerts(latitude, longitude);

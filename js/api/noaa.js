@@ -1,16 +1,28 @@
 import { CONFIG } from '../config.js';
 
+/** WGS84 precision for api.weather.gov `point` and `/points/{lat},{lon}` (5 decimals ≈ 1.1 m). */
+const NWS_COORD_DECIMALS = 5;
+
+function formatNwsLatLon(latitude, longitude) {
+    return `${Number(latitude).toFixed(NWS_COORD_DECIMALS)},${Number(longitude).toFixed(NWS_COORD_DECIMALS)}`;
+}
+
+function nwsHeaders() {
+    return {
+        'User-Agent': CONFIG.NWS_USER_AGENT || 'CoralGablesWeatherGrid/1.0',
+        Accept: 'application/geo+json, application/json;q=0.9, */*;q=0.1'
+    };
+}
+
 /**
  * Fetch current weather from NOAA Weather.gov API
  */
 export async function fetchCurrentWeather(latitude, longitude) {
     try {
         // Step 1: Get grid point metadata
-        const pointsUrl = `${CONFIG.NOAA_POINTS}/${latitude.toFixed(4)},${longitude.toFixed(4)}`;
+        const pointsUrl = `${CONFIG.NOAA_POINTS}/${formatNwsLatLon(latitude, longitude)}`;
         const pointsResponse = await fetch(pointsUrl, {
-            headers: {
-                'User-Agent': 'CoralGablesWeatherGrid/1.0'
-            }
+            headers: nwsHeaders()
         });
         
         if (!pointsResponse.ok) {
@@ -22,9 +34,7 @@ export async function fetchCurrentWeather(latitude, longitude) {
         // Step 2: Get observation stations
         const stationsUrl = pointsData.properties.observationStations;
         const stationsResponse = await fetch(stationsUrl, {
-            headers: {
-                'User-Agent': 'CoralGablesWeatherGrid/1.0'
-            }
+            headers: nwsHeaders()
         });
         
         if (!stationsResponse.ok) {
@@ -41,9 +51,7 @@ export async function fetchCurrentWeather(latitude, longitude) {
         const nearestStation = stationsData.features[0].id;
         const observationUrl = `${nearestStation}/observations/latest`;
         const observationResponse = await fetch(observationUrl, {
-            headers: {
-                'User-Agent': 'CoralGablesWeatherGrid/1.0'
-            }
+            headers: nwsHeaders()
         });
         
         if (!observationResponse.ok) {
@@ -64,11 +72,9 @@ export async function fetchCurrentWeather(latitude, longitude) {
 export async function fetchForecast(latitude, longitude) {
     try {
         // Get grid point metadata
-        const pointsUrl = `${CONFIG.NOAA_POINTS}/${latitude.toFixed(4)},${longitude.toFixed(4)}`;
+        const pointsUrl = `${CONFIG.NOAA_POINTS}/${formatNwsLatLon(latitude, longitude)}`;
         const pointsResponse = await fetch(pointsUrl, {
-            headers: {
-                'User-Agent': 'CoralGablesWeatherGrid/1.0'
-            }
+            headers: nwsHeaders()
         });
         
         if (!pointsResponse.ok) {
@@ -80,9 +86,7 @@ export async function fetchForecast(latitude, longitude) {
         // Get hourly forecast
         const forecastUrl = pointsData.properties.forecastHourly;
         const forecastResponse = await fetch(forecastUrl, {
-            headers: {
-                'User-Agent': 'CoralGablesWeatherGrid/1.0'
-            }
+            headers: nwsHeaders()
         });
         
         if (!forecastResponse.ok) {
@@ -98,51 +102,96 @@ export async function fetchForecast(latitude, longitude) {
 }
 
 /**
- * Fetch active weather alerts for location
+ * Fetch active weather alerts for a WGS84 point (returns structured result so callers can tell errors from “none active”).
  */
 export async function fetchWeatherAlerts(latitude, longitude) {
     try {
-        const url = `${CONFIG.NOAA_ALERTS}?point=${latitude.toFixed(4)},${longitude.toFixed(4)}`;
+        const url = `${CONFIG.NOAA_ALERTS}?point=${formatNwsLatLon(latitude, longitude)}`;
         const response = await fetch(url, {
-            headers: {
-                'User-Agent': 'CoralGablesWeatherGrid/1.0'
-            }
+            headers: nwsHeaders()
         });
-        
+
         if (!response.ok) {
-            throw new Error(`NOAA Alerts API error: ${response.status}`);
+            const errBody = await response.text().catch(() => '');
+            throw new Error(`NOAA Alerts API error: ${response.status}${errBody ? ` — ${errBody.slice(0, 160)}` : ''}`);
         }
-        
+
         const data = await response.json();
-        return parseNOAAAlerts(data);
+        const alerts = parseNOAAAlerts(data);
+        return { ok: true, alerts };
     } catch (error) {
         console.error('NOAA alerts fetch error:', error);
-        return []; // Return empty array on error
+        return {
+            ok: false,
+            alerts: [],
+            error: error && error.message ? error.message : String(error)
+        };
     }
 }
 
+/** NWS observation wind is m/s; app uses mph everywhere for display and merge. */
+const METERS_PER_SECOND_TO_MPH = 2.2369362920544;
+
+function celsiusToFahrenheitNullable(c) {
+    if (c === null || c === undefined || Number.isNaN(Number(c))) {
+        return null;
+    }
+    return (Number(c) * 9) / 5 + 32;
+}
+
+function metersPerSecondToMphNullable(ms) {
+    if (ms === null || ms === undefined || Number.isNaN(Number(ms))) {
+        return null;
+    }
+    return Number(ms) * METERS_PER_SECOND_TO_MPH;
+}
+
+function pickNoaaFeelsLikeF(props) {
+    const wc = props.windChill?.value;
+    const hi = props.heatIndex?.value;
+    if (wc !== null && wc !== undefined && !Number.isNaN(Number(wc))) {
+        return celsiusToFahrenheitNullable(wc);
+    }
+    if (hi !== null && hi !== undefined && !Number.isNaN(Number(hi))) {
+        return celsiusToFahrenheitNullable(hi);
+    }
+    return null;
+}
+
 /**
- * Parse NOAA observation data
+ * Parse NOAA observation (api.weather.gov) — temps in °C and wind in m/s from API; output matches other providers: °F, mph, wind direction ° meteorological (from).
  */
 function parseNOAAObservation(data) {
     const props = data.properties;
-    
-    // Convert Celsius to Fahrenheit
-    const celsiusToFahrenheit = (c) => c ? (c * 9/5) + 32 : null;
-    const metersPerSecondToMph = (ms) => ms ? ms * 2.237 : null;
-    
+
+    const humidityRaw = props.relativeHumidity?.value;
+    const pressurePa = props.barometricPressure?.value;
+
     return {
-        temperature: celsiusToFahrenheit(props.temperature.value),
-        feelsLike: celsiusToFahrenheit(props.windChill.value) || celsiusToFahrenheit(props.heatIndex.value),
-        humidity: props.relativeHumidity.value,
-        pressure: props.barometricPressure.value ? props.barometricPressure.value / 100 : null, // Convert Pa to mb
-        windSpeed: metersPerSecondToMph(props.windSpeed.value),
-        windDirection: props.windDirection.value,
-        windGust: metersPerSecondToMph(props.windGust.value),
-        precipitation: 0, // NOAA doesn't provide current precipitation in observations
-        cloudCover: props.cloudLayers && props.cloudLayers.length > 0 ? 
-            Math.max(...props.cloudLayers.map(l => l.amount === 'OVC' ? 100 : l.amount === 'BKN' ? 75 : l.amount === 'SCT' ? 50 : 25)) : 0,
-        visibility: props.visibility.value ? Math.round(props.visibility.value) : null, // Keep in meters, null if missing
+        temperature: celsiusToFahrenheitNullable(props.temperature?.value),
+        feelsLike: pickNoaaFeelsLikeF(props),
+        humidity: humidityRaw !== null && humidityRaw !== undefined ? humidityRaw : null,
+        pressure: pressurePa != null && !Number.isNaN(Number(pressurePa)) ? Number(pressurePa) / 100 : null,
+        windSpeed: metersPerSecondToMphNullable(props.windSpeed?.value),
+        /** Degrees clockwise from true N, 0–360: direction wind blows *from* (same as Open-Meteo / OpenWeatherMap). */
+        windDirection:
+            props.windDirection?.value !== null && props.windDirection?.value !== undefined
+                ? Number(props.windDirection.value)
+                : null,
+        windGust: metersPerSecondToMphNullable(props.windGust?.value),
+        precipitation: 0,
+        cloudCover:
+            props.cloudLayers && props.cloudLayers.length > 0
+                ? Math.max(
+                      ...props.cloudLayers.map((l) =>
+                          l.amount === 'OVC' ? 100 : l.amount === 'BKN' ? 75 : l.amount === 'SCT' ? 50 : 25
+                      )
+                  )
+                : 0,
+        visibility:
+            props.visibility?.value != null && !Number.isNaN(Number(props.visibility.value))
+                ? Math.round(Number(props.visibility.value))
+                : null,
         weather: props.textDescription ? props.textDescription.toLowerCase() : 'unknown',
         weatherDescription: props.textDescription || 'Unknown',
         timestamp: new Date(props.timestamp).getTime(),
@@ -173,27 +222,74 @@ function parseNOAAForecast(data) {
     };
 }
 
+function nwsSeverityRank(sev) {
+    const order = { Extreme: 0, Severe: 1, Moderate: 2, Minor: 3, Unknown: 4 };
+    return order[sev] ?? 5;
+}
+
+function nwsUrgencyRank(u) {
+    const order = { Immediate: 0, Expected: 1, Future: 2, Past: 3, Unknown: 4 };
+    return order[u] ?? 5;
+}
+
 /**
- * Parse NOAA weather alerts
+ * Parse NOAA weather alerts: drop expired, dedupe by id, sort by severity / urgency / onset.
  */
 function parseNOAAAlerts(data) {
-    if (!data.features || data.features.length === 0) {
+    if (!data?.features?.length) {
         return [];
     }
-    
-    return data.features.map(feature => ({
-        id: feature.properties.id,
-        event: feature.properties.event,
-        severity: feature.properties.severity,
-        certainty: feature.properties.certainty,
-        urgency: feature.properties.urgency,
-        headline: feature.properties.headline,
-        description: feature.properties.description,
-        instruction: feature.properties.instruction,
-        onset: new Date(feature.properties.onset).getTime(),
-        expires: new Date(feature.properties.expires).getTime(),
-        source: 'NOAA'
-    }));
+
+    const now = Date.now();
+    const seen = new Set();
+    const rows = [];
+
+    for (const feature of data.features) {
+        const p = feature.properties;
+        if (!p) {
+            continue;
+        }
+        const id = p.id;
+        const expMs = p.expires ? new Date(p.expires).getTime() : NaN;
+        if (Number.isFinite(expMs) && expMs <= now) {
+            continue;
+        }
+        if (id) {
+            if (seen.has(id)) {
+                continue;
+            }
+            seen.add(id);
+        }
+
+        const onsetMs = p.onset ? new Date(p.onset).getTime() : 0;
+        rows.push({
+            id,
+            event: p.event,
+            severity: p.severity,
+            certainty: p.certainty,
+            urgency: p.urgency,
+            headline: p.headline,
+            description: p.description,
+            instruction: p.instruction,
+            onset: onsetMs,
+            expires: Number.isFinite(expMs) ? expMs : null,
+            source: 'NOAA'
+        });
+    }
+
+    rows.sort((a, b) => {
+        const ds = nwsSeverityRank(a.severity) - nwsSeverityRank(b.severity);
+        if (ds !== 0) {
+            return ds;
+        }
+        const du = nwsUrgencyRank(a.urgency) - nwsUrgencyRank(b.urgency);
+        if (du !== 0) {
+            return du;
+        }
+        return (b.onset || 0) - (a.onset || 0);
+    });
+
+    return rows;
 }
 
 /**

@@ -107,7 +107,13 @@ const state = {
     /** Layer toggle: show NWS alert toasts over the map */
     alertsUiEnabled: true,
     /** WatchHandle from `wireSceneCameraDebugToTerminal` — removed on teardown if we add cleanup */
-    cameraDebugWatchHandle: null
+    cameraDebugWatchHandle: null,
+    /** One friendly welcome toast per page load (after first weather refresh). */
+    welcomeWeatherToastShown: false,
+    /** Throttle “drastic spread” microclimate toasts */
+    lastMicroclimateToastAt: 0,
+    /** Last NWS alerts API call: true = HTTP OK + parsed; false = error; null = not yet run */
+    lastNwsAlertsFetchOk: null
 };
 
 /** Dedupe alert toasts per session / user dismiss */
@@ -179,8 +185,10 @@ async function init() {
             showLoading(false);
             await refreshWeatherData();
             debugLog('✓ Initial weather data loaded');
+            scheduleWelcomeWeatherToast();
         } catch (refreshErr) {
             debugLog('⚠ Initial weather fetch failed, grid showing with defaults', true);
+            scheduleWelcomeWeatherToast();
         }
         
         // Setup UI event listeners
@@ -573,13 +581,6 @@ function applySceneEnvironment(view) {
     const isNight = hour >= 20 || hour < 6;
     const mode = canonicalSceneWeatherMode(state.sceneWeatherMode);
 
-    if ('viewingMode' in view) {
-        try {
-            view.viewingMode = 'global';
-        } catch (e) {
-            /* ignore */
-        }
-    }
     ensureSceneViewQuality(view);
 
     const lighting = new SunLighting({
@@ -1116,20 +1117,6 @@ async function initArcGIS() {
                         } catch (e) {
                             console.warn('Could not set map.initialViewProperties.viewingMode:', e);
                         }
-                        try {
-                            state.sceneView.viewingMode = 'global';
-                        } catch (e) {
-                            console.warn('Could not set view.viewingMode global:', e);
-                        }
-                        state.sceneView.watch('viewingMode', (mode) => {
-                            if (mode === 'local') {
-                                try {
-                                    state.sceneView.viewingMode = 'global';
-                                } catch (e) {
-                                    /* ignore */
-                                }
-                            }
-                        });
                         debugLog(
                             '✓ viewingMode locked to global (Esri sky weather is disabled for local scenes)'
                         );
@@ -1399,6 +1386,12 @@ async function refreshWeatherData() {
             await checkWeatherAlerts();
         } catch (err) {
             debugLog('Alert check failed: ' + err.message);
+        }
+
+        try {
+            maybeScheduleMicroclimateToast();
+        } catch (mcErr) {
+            console.warn('Microclimate toast schedule:', mcErr);
         }
         
         debugLog('✓ Refresh complete');
@@ -3057,21 +3050,6 @@ function initializeSplitScreen() {
                         } catch (e) {
                             /* ignore */
                         }
-                        try {
-                            state.rightSceneView.viewingMode = 'global';
-                        } catch (e) {
-                            /* ignore */
-                        }
-                        const vmWatch = state.rightSceneView.watch('viewingMode', (mode) => {
-                            if (mode === 'local') {
-                                try {
-                                    state.rightSceneView.viewingMode = 'global';
-                                } catch (e) {
-                                    /* ignore */
-                                }
-                            }
-                        });
-                        state.splitRightInternalWatchHandles.push(vmWatch);
                     }
 
                     ensureSceneViewQuality(state.rightSceneView);
@@ -3288,18 +3266,21 @@ async function checkWeatherAlerts() {
         return;
     }
     try {
-        const alerts = await WeatherService.fetchWeatherAlerts(
+        const result = await WeatherService.fetchWeatherAlerts(
             CONFIG.CORAL_GABLES_CENTER.latitude,
             CONFIG.CORAL_GABLES_CENTER.longitude
         );
-
-        if (alerts && alerts.length > 0) {
-            showWeatherAlertToasts(alerts);
-        } else {
-            pruneAlertToastTracking([]);
+        const ok = result && result.ok === true;
+        state.lastNwsAlertsFetchOk = ok;
+        const list = ok && Array.isArray(result.alerts) ? result.alerts : [];
+        if (!ok && result && result.error) {
+            debugLog('⚠ NWS alerts unavailable: ' + result.error, true);
         }
+        showWeatherAlertToasts(list);
+        showLiveWeatherSupplementToasts(list);
     } catch (error) {
-        // Silent fail for alerts
+        state.lastNwsAlertsFetchOk = false;
+        debugLog('⚠ NWS alerts check failed: ' + (error && error.message ? error.message : String(error)), true);
     }
 }
 
@@ -3361,8 +3342,661 @@ function dismissAlertToast(toastEl, key, userInitiated) {
     setTimeout(finish, exitMs + 80);
 }
 
+function pickRandomString(arr) {
+    if (!arr || arr.length === 0) {
+        return '';
+    }
+    return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function getWelcomeWeatherSnapshot() {
+    const w = state.coralGablesLiveWeather;
+    if (w && typeof w.temperature === 'number' && Number.isFinite(w.temperature)) {
+        return {
+            tempF: w.temperature,
+            windMph: typeof w.windSpeed === 'number' && Number.isFinite(w.windSpeed) ? w.windSpeed : null
+        };
+    }
+    const center = state.samplingPoints?.find((p) => p.id === 'center');
+    const wd = center?.weatherData;
+    if (wd && typeof wd.temperature === 'number' && Number.isFinite(wd.temperature)) {
+        return {
+            tempF: wd.temperature,
+            windMph: typeof wd.windSpeed === 'number' && Number.isFinite(wd.windSpeed) ? wd.windSpeed : null
+        };
+    }
+    return { tempF: null, windMph: null };
+}
+
+function getWelcomeTimeGreeting() {
+    const h = new Date().getHours();
+    if (h >= 5 && h < 12) {
+        return pickRandomString([
+            'Good morning!',
+            'Good morning, Coral Gables.',
+            'Rise and shine—good morning!',
+            'Morning! The grid is awake and so are we.',
+            'Top of the morning to you.',
+            'Hello, sunshine—good morning!',
+            'Morning vibes only.',
+            'Good morning—grab coffee, then clouds.'
+        ]);
+    }
+    if (h >= 12 && h < 17) {
+        return pickRandomString([
+            'Good afternoon!',
+            'Happy afternoon!',
+            'Good afternoon—hope lunch was kind.',
+            'Afternoon check-in: you look ready.',
+            'Good afternoon, neighbor.',
+            'Afternoon! Still daylight; still dramatic.',
+            'Hey there—good afternoon!',
+            'Afternoon status: partly awesome.'
+        ]);
+    }
+    if (h >= 17 && h < 22) {
+        return pickRandomString([
+            'Good evening!',
+            'Good evening—golden hour energy.',
+            'Evening! The map cooled down; you can too.',
+            'Good evening, Coral Gables.',
+            'Evening vibes—stay cozy.',
+            'Hello—good evening!',
+            'Evening check-in: dress like you mean it.',
+            'Good evening—streetlights are warming up.'
+        ]);
+    }
+    return pickRandomString([
+        'Good evening—or good night if you should be asleep.',
+        'Burning the midnight oil? Good evening anyway.',
+        'Late hours? Good evening, night owl.',
+        'Good night… or good evening with extra espresso.',
+        'Evening (or night—we do not judge).',
+        'Hello, night shift of weather enthusiasts.',
+        'Good evening—the breeze wrote this message.',
+        'Still up? Good evening, legend.'
+    ]);
+}
+
+function buildWelcomeWeatherBody() {
+    const { tempF, windMph } = getWelcomeWeatherSnapshot();
+    const greeting = getWelcomeTimeGreeting();
+    const w = windMph != null ? windMph : null;
+    const t = tempF != null ? tempF : null;
+
+    const windy = w != null && w >= 12;
+    const blustery = w != null && w >= 18;
+
+    let tip = '';
+    if (t == null) {
+        tip = pickRandomString([
+            'Our thermometer is shy today—layer up, stay hydrated, and blame the APIs if needed.',
+            'No live temp yet—dress in layers and walk like you planned it.',
+            'Weather data is loading its personality—until then, be kind to yourself and bring a jacket just in case.',
+            'If the sky looks undecided, your outfit can be decisive: layers win.',
+            'Forecast: mysterious. Strategy: comfy shoes and a backup hoodie.',
+            'We will nag you about a scarf later—today, trust your instincts and a light layer.'
+        ]);
+    } else if (t < 55 && blustery) {
+        tip = pickRandomString([
+            'It is brisk and the wind is auditioning for a storm commercial—bundle up, secure the hat, stay warm.',
+            'Cold plus windy equals “invented wind chill.” Fleece up, channel penguin energy, stay cozy.',
+            'The breeze wants your warmth—deny it with layers, a smug smile, and hot beverage diplomacy.',
+            'Dress like you are meeting winter halfway: coat, scarf, and mild indignation at gusts.',
+            'Think onion layers, not fashion layers—stay warm and slightly unstoppable.',
+            'Stay warm: the wind is just trying to steal your heat; do not negotiate.',
+            'Hot drink in hand, hood optional but recommended—this is not a drill.',
+            'Polar bear cosplay is optional; dignity and insulation are not.'
+        ]);
+    } else if (t < 58) {
+        tip = pickRandomString([
+            'Chilly out—layer like a cake: more is more, frosting optional.',
+            'Stay warm: flannel is a love language.',
+            'Dress for cold like you mean business—mittens are not a weakness.',
+            'It is sweater weather with attitude—bring the cozy.',
+            'Keep your core happy: jacket, smug grin, maybe soup later.',
+            'Cold enough to justify that scarf you bought “just in case.”',
+            'Thermal optimism: you have got this; add one more layer anyway.',
+            'Stay warm—your future self is rooting for sleeves.'
+        ]);
+    } else if (t < 65 && windy) {
+        tip = pickRandomString([
+            'Cool and breezy—wind wants to rearrange your hair; dress smart and anchor your coffee.',
+            'A little crisp with wind—light jacket, firm grip on your umbrella ego.',
+            'Layers plus wind awareness: hold onto your receipts and your hat.',
+            'Not freezing, but the wind has opinions—dress accordingly and walk with intent.',
+            'Think light coat, good vibes, and mild suspicion of gusts.',
+            'Breezy cool: channel stylish sailboat, not loose patio furniture.'
+        ]);
+    } else if (t >= 65 && t <= 79 && (w == null || w <= 12)) {
+        tip = pickRandomString([
+            'This is genuinely perfect weather—mild air, light breeze or calm, no notes. Go touch grass (or a palm).',
+            'Chef’s kiss: today is a “screenshot the sky” day. Temps and wind are in the sweet spot.',
+            'Weather report: 10/10, would recommend going outside and acting smug about it.',
+            'Basically ideal—comfortable, not dramatic. Savor it before the atmosphere gets ideas.',
+            'Perfect patio weather: you could host a brunch or a nap; both are valid.',
+            'If weather had Yelp, this would be five stars and a “will return.”',
+            'Goldilocks certified: not too hot, not too cold, wind behaving. Rare; enjoy the rerun.',
+            'Nature turned down the difficulty—dress comfy, skip the jacket debate, win the day.',
+            'This is the kind of day people describe as “room temperature outside”—and they mean it as a compliment.',
+            'Ideal conditions: tell someone you love them, or at least your barista.',
+            'Meteorological unicorn: pleasant, stable, and unlikely to humble you—get out there.',
+            'Perfect for a walk, a window down, or pretending you always dress this appropriately.'
+        ]);
+    } else if (t >= 88) {
+        tip = pickRandomString([
+            'Hot one—light clothes, water bottle, and pretend you enjoy sweating a little.',
+            'Dress for heat: breathable fabrics, sunscreen, and occasional shade diplomacy.',
+            'It is toasty—think linen, hydration, and not challenging the sun to a duel.',
+            'Warm enough to melt resolve—stay cool, drink water, avoid dark car seats.',
+            'Heat advisory from your wardrobe: fewer layers, more ice in beverages.',
+            'Dress light—your shadow is tired of working overtime.',
+            'Sunscreen is a friend; denial is not.',
+            'Hydrate like you are sponsored by water—because you are.'
+        ]);
+    } else if (t >= 75) {
+        tip = pickRandomString([
+            'Warm out—dress light, hydrate, and forgive the humidity.',
+            'Nice and warm—breathable clothes, sunscreen, and smug sunglasses.',
+            'Think summer-lite: comfy, breezy, slightly smug about your outfit.',
+            'Dress well for warmth—linen wants to be your friend.',
+            'Warm weather uniform: light shirt, water, and pretending you planned the sweat.',
+            'Stay cool literally: shade, sips, and no wool unless you are a sheep.',
+            'Perfect excuse for sandals—socks optional, dignity negotiable.'
+        ]);
+    } else if (blustery && t < 80) {
+        tip = pickRandomString([
+            'Windy enough to steal napkins—secure loose items and dress in snug layers.',
+            'Breezy day—hold your hat, your coffee, and mildly unreasonable optimism.',
+            'Gusty out—tie down your umbrella ego and enjoy the drama.',
+            'Wind is doing cardio—match it with a jacket that does not flap like a flag.',
+            'Blustery vibes: dress snug, walk purposeful, ignore hair physics.'
+        ]);
+    } else {
+        tip = pickRandomString([
+            'Pretty pleasant—dress comfortably and pretend you planned the weather.',
+            'Goldilocks zone: not too hot, not too cold—outfit flex allowed.',
+            'Nice out—dress well, stroll confidently, blame the grid if anything looks off.',
+            'Comfortable temps—layer lightly and enjoy being smug about your forecast read.',
+            'Balanced weather: jacket in backpack, optimism in front pocket.',
+            'You can probably survive with one good decision and decent shoes.',
+            'Mild and manageable—dress like you have your life together (we will not check).',
+            'Lovely conditions—sunscreen optional, good mood recommended.'
+        ]);
+    }
+
+    const stats =
+        t != null
+            ? ` Around ${Math.round(t)}°F${w != null ? `, wind ~${Math.round(w)} mph` : ''}.`
+            : '';
+
+    return `${greeting}${stats} ${tip}`;
+}
+
+function scheduleWelcomeWeatherToast() {
+    if (state.welcomeWeatherToastShown) {
+        return;
+    }
+    state.welcomeWeatherToastShown = true;
+    setTimeout(() => {
+        try {
+            showWelcomeWeatherToast();
+        } catch (e) {
+            console.warn('Welcome weather toast:', e);
+        }
+    }, 500);
+}
+
 /**
- * Small top-center toasts; dismissible, auto fade-out (see CONFIG.ALERT_TOAST_*).
+ * One-time friendly toast after load (not tied to NWS toggle).
+ */
+function showWelcomeWeatherToast() {
+    const host = document.getElementById('alertToastHost');
+    if (!host) {
+        return;
+    }
+    const key = '__welcome_weather__';
+    const existing = alertToastRuntime.autoHideTimers.get(key);
+    if (existing) {
+        clearTimeout(existing);
+        alertToastRuntime.autoHideTimers.delete(key);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = 'alert-toast alert-toast--welcome';
+    toast.setAttribute('role', 'status');
+
+    const text = document.createElement('div');
+    text.className = 'alert-toast__text';
+    text.textContent = buildWelcomeWeatherBody();
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'alert-toast__dismiss';
+    btn.setAttribute('aria-label', 'Dismiss');
+    btn.textContent = '✕';
+    btn.addEventListener('click', () => dismissAlertToast(toast, key, true));
+
+    toast.appendChild(text);
+    toast.appendChild(btn);
+    host.appendChild(toast);
+
+    const autoMs = CONFIG.WELCOME_TOAST_AUTO_DISMISS_MS ?? 14000;
+    const timerId = setTimeout(() => {
+        alertToastRuntime.autoHideTimers.delete(key);
+        dismissAlertToast(toast, key, false);
+    }, autoMs);
+    alertToastRuntime.autoHideTimers.set(key, timerId);
+}
+
+function getCoralGablesAreaLabel(pointId) {
+    if (!pointId) {
+        return 'that part of the map';
+    }
+    if (pointId === 'center') {
+        return 'central Coral Gables';
+    }
+    const north = pointId.match(/^north_(\d)$/);
+    if (north) {
+        const i = Number(north[1]);
+        const ew = i <= 1 ? 'Northwest' : i === 2 ? 'North (center)' : i >= 3 ? 'Northeast' : 'North';
+        return `${ew} Coral Gables`;
+    }
+    const south = pointId.match(/^south_(\d)$/);
+    if (south) {
+        const i = Number(south[1]);
+        const ew = i <= 1 ? 'Southwest' : i === 2 ? 'South (center)' : i >= 3 ? 'Southeast' : 'South';
+        return `${ew} Coral Gables`;
+    }
+    if (pointId.startsWith('middle_')) {
+        const i = Number(pointId.split('_')[1]);
+        const ew = i <= 1 ? 'West midtown' : i >= 3 ? 'East midtown' : 'Midtown';
+        return `${ew} Coral Gables`;
+    }
+    if (pointId === 'mid_layer_north') {
+        return 'upper midtown Coral Gables';
+    }
+    if (pointId === 'mid_layer_south') {
+        return 'lower midtown Coral Gables';
+    }
+    return 'a station on the grid';
+}
+
+/** Short tag for how a temperature “feels” (hot / cold / perfect-ish). */
+function describeTempFeelTag(tempF) {
+    const t = Number(tempF);
+    if (!Number.isFinite(t)) {
+        return 'mixed';
+    }
+    if (t >= 90) {
+        return 'really hot';
+    }
+    if (t >= 82) {
+        return 'quite hot';
+    }
+    if (t >= 75) {
+        return 'warm';
+    }
+    if (t >= 68 && t <= 78) {
+        return 'pretty perfect';
+    }
+    if (t >= 62) {
+        return 'mild';
+    }
+    if (t >= 52) {
+        return 'cool';
+    }
+    if (t >= 40) {
+        return 'cold';
+    }
+    return 'really cold';
+}
+
+function computeSamplingTemperatureExtremes(samplingPoints) {
+    const pts = (samplingPoints || []).filter(
+        (p) =>
+            p &&
+            p.weatherData &&
+            typeof p.weatherData.temperature === 'number' &&
+            Number.isFinite(p.weatherData.temperature) &&
+            !p.weatherData.error
+    );
+    if (pts.length < 5) {
+        return null;
+    }
+    let maxP = pts[0];
+    let minP = pts[0];
+    for (const p of pts) {
+        const v = p.weatherData.temperature;
+        if (v > maxP.weatherData.temperature) {
+            maxP = p;
+        }
+        if (v < minP.weatherData.temperature) {
+            minP = p;
+        }
+    }
+    const maxT = maxP.weatherData.temperature;
+    const minT = minP.weatherData.temperature;
+    const spread = maxT - minT;
+    if (spread <= 0) {
+        return null;
+    }
+    return { maxP, minP, maxT, minT, spread, n: pts.length };
+}
+
+function buildMicroclimateToastBody(ext) {
+    const hotName = getCoralGablesAreaLabel(ext.maxP.id);
+    const coolName = getCoralGablesAreaLabel(ext.minP.id);
+    const hotTag = describeTempFeelTag(ext.maxT);
+    const coolTag = describeTempFeelTag(ext.minT);
+    const spreadR = Math.round(ext.spread);
+
+    const sameSpot = ext.maxP.id === ext.minP.id;
+    if (sameSpot) {
+        return null;
+    }
+
+    return pickRandomString([
+        `Across Coral Gables the grid is split about ${spreadR}°F: ${hotName} is running ${hotTag} (~${Math.round(
+            ext.maxT
+        )}°F) while ${coolName} is ${coolTag} (~${Math.round(ext.minT)}°F). Same city, different thermostat.`,
+        `Microclimate alert (friendly): ${hotName} is the hot pocket today—${hotTag} at ~${Math.round(
+            ext.maxT
+        )}°F—while ${coolName} stays ${coolTag} (~${Math.round(ext.minT)}°F). That is a ~${spreadR}°F swing.`,
+        `Heads up: ~${spreadR}°F separates the warmest and coolest corners. ${hotName} feels ${hotTag} (~${Math.round(
+            ext.maxT
+        )}°F); ${coolName} is ${coolTag} (~${Math.round(ext.minT)}°F). Plan layers if you are crossing the grid.`,
+        `Plot twist: ${coolName} is the relative cool zone (${coolTag}, ~${Math.round(
+            ext.minT
+        )}°F) and ${hotName} is baking (${hotTag}, ~${Math.round(ext.maxT)}°F)—roughly ${spreadR}°F apart.`,
+        `The map is not shy today: ${hotName} ~${Math.round(ext.maxT)}°F (${hotTag}) vs ${coolName} ~${Math.round(
+            ext.minT
+        )}°F (${coolTag}). Coral Gables is doing several seasons at once.`,
+        `Drastic spread (~${spreadR}°F): ${hotName} reads ${hotTag} (~${Math.round(
+            ext.maxT
+        )}°F); ${coolName} feels ${coolTag} (~${Math.round(ext.minT)}°F). Dress for the neighborhood, not just the average.`
+    ]);
+}
+
+function maybeScheduleMicroclimateToast() {
+    if (!CONFIG.MICROCLIMATE_TOAST_ENABLED) {
+        return;
+    }
+    const delay = Math.max(500, Number(CONFIG.MICROCLIMATE_TOAST_DELAY_MS) || 3600);
+    setTimeout(() => {
+        try {
+            attemptMicroclimateToast();
+        } catch (e) {
+            console.warn('Microclimate toast:', e);
+        }
+    }, delay);
+}
+
+function attemptMicroclimateToast() {
+    if (!CONFIG.MICROCLIMATE_TOAST_ENABLED) {
+        return;
+    }
+    const isSample = state.samplingPoints.some((p) => p.weatherData?.source === 'sample-data');
+    if (isSample) {
+        return;
+    }
+
+    const minSpread = Math.max(4, Number(CONFIG.MICROCLIMATE_MIN_SPREAD_F) || 10);
+    const chance = Math.min(1, Math.max(0, Number(CONFIG.MICROCLIMATE_TOAST_CHANCE) ?? 0.38));
+    const minGap = Math.max(60 * 1000, Number(CONFIG.MICROCLIMATE_TOAST_MIN_INTERVAL_MS) || 8 * 60 * 1000);
+
+    if (Math.random() > chance) {
+        return;
+    }
+    if (Date.now() - state.lastMicroclimateToastAt < minGap) {
+        return;
+    }
+
+    const ext = computeSamplingTemperatureExtremes(state.samplingPoints);
+    if (!ext || ext.spread < minSpread) {
+        return;
+    }
+
+    const body = buildMicroclimateToastBody(ext);
+    if (!body) {
+        return;
+    }
+
+    showMicroclimateToast(body);
+    state.lastMicroclimateToastAt = Date.now();
+}
+
+function showMicroclimateToast(message) {
+    const host = document.getElementById('alertToastHost');
+    if (!host) {
+        return;
+    }
+    const key = '__microclimate__';
+    const existingTimer = alertToastRuntime.autoHideTimers.get(key);
+    if (existingTimer) {
+        clearTimeout(existingTimer);
+        alertToastRuntime.autoHideTimers.delete(key);
+    }
+    for (const el of host.querySelectorAll('.alert-toast--microclimate')) {
+        el.remove();
+    }
+
+    const toast = document.createElement('div');
+    toast.className = 'alert-toast alert-toast--microclimate';
+    toast.setAttribute('role', 'status');
+
+    const text = document.createElement('div');
+    text.className = 'alert-toast__text';
+    text.textContent = message;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'alert-toast__dismiss';
+    btn.setAttribute('aria-label', 'Dismiss');
+    btn.textContent = '✕';
+    btn.addEventListener('click', () => dismissAlertToast(toast, key, true));
+
+    toast.appendChild(text);
+    toast.appendChild(btn);
+    host.appendChild(toast);
+
+    const autoMs = CONFIG.MICROCLIMATE_TOAST_AUTO_DISMISS_MS ?? 12000;
+    const timerId = setTimeout(() => {
+        alertToastRuntime.autoHideTimers.delete(key);
+        dismissAlertToast(toast, key, false);
+    }, autoMs);
+    alertToastRuntime.autoHideTimers.set(key, timerId);
+}
+
+/**
+ * Remove NWS toasts that are no longer in the active feed (expired / cancelled alerts).
+ */
+function reconcileNwsAlertToastsInDom(host, activeAlerts) {
+    const activeKeys = new Set(activeAlerts.map(alertStableKey));
+    for (const el of [...host.querySelectorAll('.alert-toast--nws')]) {
+        const k = el.dataset.nwsKey;
+        if (!k || !activeKeys.has(k)) {
+            const pending = alertToastRuntime.autoHideTimers.get(k);
+            if (pending) {
+                clearTimeout(pending);
+            }
+            if (k) {
+                alertToastRuntime.autoHideTimers.delete(k);
+                alertToastRuntime.shownIds.delete(k);
+            }
+            el.remove();
+        }
+    }
+}
+
+/**
+ * Visual bucket for NWS headline/event (storm, rain, fog, flood, etc.).
+ */
+function classifyNwsAlertVisualClass(alert) {
+    const s = `${alert.event || ''} ${alert.headline || ''}`.toLowerCase();
+    if (/tornado|hurricane|typhoon|extreme wind|extreme cold/.test(s)) {
+        return 'alert-toast--nws-severe';
+    }
+    if (/severe thunderstorm|thunderstorm warning|thunderstorm watch|lightning|hail|squall|waterspout/.test(s)) {
+        return 'alert-toast--nws-storm';
+    }
+    if (/flash flood|river flood|coastal flood|flood warning|flood advisory|areal flood|hydrologic/.test(s)) {
+        return 'alert-toast--nws-flood';
+    }
+    if (/blizzard|winter storm|ice storm|freeze|frost|snow|sleet|freezing rain|winter weather|wind chill/.test(s)) {
+        return 'alert-toast--nws-winter';
+    }
+    if (/excessive heat|heat advisory|heat warning|heat watch|red flag|fire weather/.test(s)) {
+        return 'alert-toast--nws-heat';
+    }
+    if (/dense fog|fog advisory|fog|mist|dense smoke|low visibility/.test(s)) {
+        return 'alert-toast--nws-fog';
+    }
+    if (/rain|shower|drizzle|precipitation|flood watch|hydrologic outlook/.test(s)) {
+        return 'alert-toast--nws-rain';
+    }
+    if (/high wind|wind advisory|wind warning|gale|tropical storm|coastal hazard|rip current|surf|marine|beach|small craft/.test(s)) {
+        return 'alert-toast--nws-wind';
+    }
+    const sev = alert.severity || '';
+    if (sev === 'Extreme' || sev === 'Severe') {
+        return 'alert-toast--nws-severe';
+    }
+    if (sev === 'Moderate') {
+        return 'alert-toast--nws-warning';
+    }
+    if (sev === 'Minor') {
+        return 'alert-toast--nws-advisory';
+    }
+    return 'alert-toast--nws-default';
+}
+
+function nwsAlertsCoverHazard(nwsAlerts, hazard) {
+    const t = (nwsAlerts || []).map((a) => `${a.event || ''} ${a.headline || ''}`).join(' ').toLowerCase();
+    if (hazard === 'storm') {
+        return /thunder|tornado|severe|hurricane|tropical|wind advisory|wind warning|gale|waterspout|lightning|hail|marine|surf|rip|coastal|storm|squall/.test(
+            t
+        );
+    }
+    if (hazard === 'rain') {
+        return /rain|shower|flood|thunder|storm|precipitation|drizzle|hydrologic/.test(t);
+    }
+    if (hazard === 'fog') {
+        return /fog|mist|dense smoke|visibility/.test(t);
+    }
+    if (hazard === 'snow') {
+        return /snow|ice|winter|freeze|blizzard|sleet|frost/.test(t);
+    }
+    return false;
+}
+
+/**
+ * One “live conditions” toast when API/scene suggests storm, rain, fog, or snow but NWS list does not spell it out.
+ */
+function showLiveWeatherSupplementToasts(nwsAlerts) {
+    if (!CONFIG.LIVE_CONDITION_SUPPLEMENT_ENABLED || !state.alertsUiEnabled) {
+        return;
+    }
+    if (state.lastNwsAlertsFetchOk !== true) {
+        return;
+    }
+    const host = document.getElementById('alertToastHost');
+    if (!host) {
+        return;
+    }
+    if (state.samplingPoints.some((p) => p.weatherData?.source === 'sample-data')) {
+        return;
+    }
+
+    const supKey = '__live_condition_supplement__';
+    for (const el of host.querySelectorAll('.alert-toast--live-supplement')) {
+        el.remove();
+    }
+    const oldT = alertToastRuntime.autoHideTimers.get(supKey);
+    if (oldT) {
+        clearTimeout(oldT);
+        alertToastRuntime.autoHideTimers.delete(supKey);
+    }
+
+    const w = pickRepresentativeWeatherSampleFromPoints(state.samplingPoints);
+    if (!w) {
+        return;
+    }
+
+    const mode = deriveSceneWeatherModeFromApiData(w);
+    const desc = String(w.weatherDescription || w.weather || '').toLowerCase();
+    const gust = typeof w.windGust === 'number' && Number.isFinite(w.windGust) ? w.windGust : 0;
+    const wind = typeof w.windSpeed === 'number' && Number.isFinite(w.windSpeed) ? w.windSpeed : 0;
+
+    let message = null;
+    let variant = 'alert-toast--live-supplement alert-toast--live-default';
+
+    if (!nwsAlertsCoverHazard(nwsAlerts, 'storm') && (desc.includes('thunder') || gust >= 38 || wind >= 32)) {
+        variant = 'alert-toast--live-supplement alert-toast--live-storm';
+        message = pickRandomString([
+            `Live conditions: merged stations show strong wind (~${Math.round(wind)} mph${
+                gust ? `, gusts ~${Math.round(gust)}` : ''
+            }). No storm-class alert is active for this map point in the NWS feed—use radar and caution.`,
+            'Live: wind is flexing today. Sky may be cooking up drama—check radar and shelter if it gets loud.',
+            'Live snapshot: breezy to rowdy winds. If thunder crashes the party, head indoors—common sense, uncommon wind.'
+        ]);
+    } else if (!nwsAlertsCoverHazard(nwsAlerts, 'snow') && mode === 'snowy') {
+        variant = 'alert-toast--live-supplement alert-toast--live-winter';
+        message = pickRandomString([
+            'Live conditions: snow/ice showing in station data. Roads may disagree with your tires—take it slow.',
+            'Live: wintry mix energy detected. Warm socks, gentle braking, hot cocoa diplomacy.'
+        ]);
+    } else if (!nwsAlertsCoverHazard(nwsAlerts, 'fog') && mode === 'foggy') {
+        variant = 'alert-toast--live-supplement alert-toast--live-fog';
+        message = pickRandomString([
+            'Live conditions: fog/mist in the readings—visibility might be doing impressions of a ghost.',
+            'Live: pea-soup vibes. Low beams on, speed down, drama optional.',
+            'Live snapshot: fog on the sensors. Treat intersections like plot twists—slow and attentive.'
+        ]);
+    } else if (!nwsAlertsCoverHazard(nwsAlerts, 'rain') && (mode === 'rainy' || /rain|shower|drizzle/.test(desc))) {
+        variant = 'alert-toast--live-supplement alert-toast--live-rain';
+        message = pickRandomString([
+            'Live conditions: rain or drizzle in the merged station feed—grab cover; puddles are social hubs.',
+            'Live: wet pavement arc. Umbrella up, cornering gentle, playlist appropriately melancholic.',
+            'Live snapshot: precipitation detected. Good day to be waterproof and smug about your jacket choice.'
+        ]);
+    }
+
+    if (!message) {
+        return;
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `alert-toast ${variant}`;
+    toast.setAttribute('role', 'status');
+
+    const text = document.createElement('div');
+    text.className = 'alert-toast__text';
+    text.textContent = message;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'alert-toast__dismiss';
+    btn.setAttribute('aria-label', 'Dismiss live conditions notice');
+    btn.textContent = '✕';
+    btn.addEventListener('click', () => dismissAlertToast(toast, supKey, true));
+
+    toast.appendChild(text);
+    toast.appendChild(btn);
+    host.appendChild(toast);
+
+    const autoMs = Number(CONFIG.LIVE_CONDITION_SUPPLEMENT_AUTO_DISMISS_MS);
+    if (autoMs > 0) {
+        const timerId = setTimeout(() => {
+            alertToastRuntime.autoHideTimers.delete(supKey);
+            dismissAlertToast(toast, supKey, false);
+        }, autoMs);
+        alertToastRuntime.autoHideTimers.set(supKey, timerId);
+    }
+}
+
+/**
+ * Small top-center toasts; dismissible; optional auto fade-out (0 = keep until dismissed or API removes).
  */
 function showWeatherAlertToasts(alerts) {
     if (!state.alertsUiEnabled) {
@@ -3372,10 +4006,14 @@ function showWeatherAlertToasts(alerts) {
     if (!host) {
         return;
     }
-    pruneAlertToastTracking(alerts);
-    const max = CONFIG.ALERT_TOAST_MAX_VISIBLE ?? 3;
-    const slice = alerts.slice(0, max);
-    for (const alert of slice) {
+    const list = Array.isArray(alerts) ? alerts : [];
+    reconcileNwsAlertToastsInDom(host, list);
+    pruneAlertToastTracking(list);
+
+    const max = CONFIG.ALERT_TOAST_MAX_VISIBLE;
+    const capped = !max || max <= 0 ? list : list.slice(0, max);
+
+    for (const alert of capped) {
         const key = alertStableKey(alert);
         if (alertToastRuntime.dismissedIds.has(key)) {
             continue;
@@ -3386,15 +4024,10 @@ function showWeatherAlertToasts(alerts) {
         alertToastRuntime.shownIds.add(key);
 
         const toast = document.createElement('div');
-        toast.className = 'alert-toast';
-        toast.setAttribute('role', 'status');
-
-        const sev = alert.severity || '';
-        if (sev === 'Moderate') {
-            toast.classList.add('alert-toast--warning');
-        } else if (sev === 'Minor') {
-            toast.classList.add('alert-toast--advisory');
-        }
+        const visual = classifyNwsAlertVisualClass(alert);
+        toast.className = `alert-toast alert-toast--nws ${visual}`;
+        toast.setAttribute('role', 'alert');
+        toast.dataset.nwsKey = key;
 
         const text = document.createElement('div');
         text.className = 'alert-toast__text';
@@ -3411,12 +4044,14 @@ function showWeatherAlertToasts(alerts) {
         toast.appendChild(btn);
         host.appendChild(toast);
 
-        const autoMs = CONFIG.ALERT_TOAST_AUTO_DISMISS_MS ?? 9000;
-        const timerId = setTimeout(() => {
-            alertToastRuntime.autoHideTimers.delete(key);
-            dismissAlertToast(toast, key, false);
-        }, autoMs);
-        alertToastRuntime.autoHideTimers.set(key, timerId);
+        const autoMs = Number(CONFIG.ALERT_TOAST_AUTO_DISMISS_MS);
+        if (autoMs > 0) {
+            const timerId = setTimeout(() => {
+                alertToastRuntime.autoHideTimers.delete(key);
+                dismissAlertToast(toast, key, false);
+            }, autoMs);
+            alertToastRuntime.autoHideTimers.set(key, timerId);
+        }
     }
 }
 
@@ -3438,13 +4073,43 @@ function showLoading(show, message = 'Loading...') {
 function updateProgress() {}
 
 function updateDataSourceDisplay(successful, failed) {
-    const isSampleData = state.samplingPoints.some(p => p.weatherData?.source === 'sample-data');
-    document.getElementById('sourceStatus').textContent = isSampleData ? 'Sample Data' : 'Active';
-    document.getElementById('successCount').textContent = successful;
-    document.getElementById('failedCount').textContent = failed;
-    
+    const total = state.samplingPoints.length;
+    const sum = successful + failed;
+    const isSampleData = state.samplingPoints.some((p) => p.weatherData?.source === 'sample-data');
+    const hasPartial =
+        !isSampleData && successful > 0 && failed > 0;
+
+    let status = 'Live (APIs)';
     if (isSampleData) {
-        debugLog('ℹ️ Using sample data - real APIs unavailable');
+        status = 'Sample / demo (not live observations)';
+    } else if (successful === 0 && failed > 0) {
+        status = 'No live station data';
+    } else if (hasPartial) {
+        status = 'Live (partial — some stations failed)';
+    }
+
+    const srcEl = document.getElementById('sourceStatus');
+    const okEl = document.getElementById('successCount');
+    const badEl = document.getElementById('failedCount');
+    const totEl = document.getElementById('stationTotal');
+    if (srcEl) {
+        srcEl.textContent = status;
+    }
+    if (okEl) {
+        okEl.textContent = String(successful);
+    }
+    if (badEl) {
+        badEl.textContent = String(failed);
+    }
+    if (totEl) {
+        totEl.textContent = String(total);
+    }
+    if (sum !== total && total > 0) {
+        debugLog(`⚠ Station count mismatch: ok+fail=${sum} vs points=${total}`, true);
+    }
+
+    if (isSampleData) {
+        debugLog('ℹ️ Using sample data — real APIs unavailable for stations');
     }
 }
 
@@ -3498,14 +4163,37 @@ function updateCoralGablesLiveDisplay() {
             Number.isFinite(w.windDirection)
         ) {
             const comp = windDirectionToCompass16(w.windDirection);
-            windEl.textContent = `Wind: ${w.windSpeed.toFixed(1)} mph from ${comp}`;
+            const deg = Math.round(((w.windDirection % 360) + 360) % 360);
+            let line = `Wind: ${w.windSpeed.toFixed(1)} mph from ${comp} (${deg}°)`;
+            if (
+                typeof w.windGust === 'number' &&
+                Number.isFinite(w.windGust) &&
+                w.windGust > w.windSpeed + 0.5
+            ) {
+                line += ` · gusts ${w.windGust.toFixed(1)} mph`;
+            }
+            windEl.textContent = line;
         } else {
             windEl.textContent = 'Wind: —';
         }
     }
     if (srcEl) {
         const raw = w.sources || w.source || '';
-        srcEl.textContent = raw ? `Sources: ${raw}` : '';
+        const parts = [];
+        if (raw) {
+            parts.push(`Sources: ${raw}`);
+        }
+        if (typeof w.timestamp === 'number' && Number.isFinite(w.timestamp)) {
+            const age = Date.now() - w.timestamp;
+            const obs = new Date(w.timestamp);
+            const obsStr = obs.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+            if (age >= 0 && age < 2 * 60 * 60 * 1000) {
+                parts.push(`Observation ${obsStr} (${Math.round(age / 60000)} min ago)`);
+            } else if (age >= 0) {
+                parts.push(`Observation ${obsStr}`);
+            }
+        }
+        srcEl.textContent = parts.join(' · ');
     }
 }
 

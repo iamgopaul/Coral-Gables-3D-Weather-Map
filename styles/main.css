@@ -976,7 +976,20 @@ select.lighting-test-hud-select option {
     align-items: stretch;
     gap: 8px;
     width: min(380px, calc(100vw - 2 * var(--map-frame-inset) - var(--map-taskbar-expanded-w) - 20px));
+    max-height: min(70vh, 560px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 4px;
     pointer-events: none;
+}
+
+.alert-toast-host::-webkit-scrollbar {
+    width: 6px;
+}
+
+.alert-toast-host::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.22);
+    border-radius: 3px;
 }
 
 #app:has(#mapTaskbar.panel--minimized) .alert-toast-host {
@@ -1026,6 +1039,134 @@ select.lighting-test-hud-select option {
     background: rgba(202, 138, 4, 0.95);
     color: #1c1917;
     border-color: rgba(0, 0, 0, 0.12);
+}
+
+/* Friendly welcome toast (time-of-day + dress-for-weather) — distinct from NWS alerts */
+.alert-toast--welcome {
+    background: linear-gradient(
+        135deg,
+        rgba(22, 78, 99, 0.96) 0%,
+        rgba(13, 148, 136, 0.94) 50%,
+        rgba(15, 118, 110, 0.96) 100%
+    );
+    color: #ecfeff;
+    border-color: rgba(165, 243, 252, 0.35);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.45;
+}
+
+/* Grid microclimate / sharp temperature contrast between neighborhoods */
+.alert-toast--microclimate {
+    background: linear-gradient(
+        125deg,
+        rgba(88, 28, 135, 0.95) 0%,
+        rgba(109, 40, 217, 0.93) 45%,
+        rgba(59, 130, 246, 0.92) 100%
+    );
+    color: #f5f3ff;
+    border-color: rgba(196, 181, 253, 0.4);
+    font-size: 11.5px;
+    font-weight: 500;
+    line-height: 1.45;
+}
+
+/* NWS official alerts — color by hazard type */
+.alert-toast--nws.alert-toast--nws-default {
+    background: rgba(153, 27, 27, 0.94);
+    color: #fef2f2;
+}
+
+.alert-toast--nws.alert-toast--nws-severe {
+    background: linear-gradient(135deg, rgba(88, 28, 135, 0.97) 0%, rgba(127, 29, 29, 0.96) 100%);
+    color: #faf5ff;
+    border-color: rgba(233, 213, 255, 0.35);
+}
+
+.alert-toast--nws.alert-toast--nws-storm {
+    background: linear-gradient(135deg, rgba(30, 27, 75, 0.96) 0%, rgba(67, 56, 202, 0.95) 100%);
+    color: #eef2ff;
+    border-color: rgba(165, 180, 252, 0.4);
+}
+
+.alert-toast--nws.alert-toast--nws-flood {
+    background: linear-gradient(135deg, rgba(30, 58, 138, 0.96) 0%, rgba(29, 78, 216, 0.94) 100%);
+    color: #eff6ff;
+    border-color: rgba(147, 197, 253, 0.45);
+}
+
+.alert-toast--nws.alert-toast--nws-winter {
+    background: linear-gradient(135deg, rgba(12, 74, 110, 0.96) 0%, rgba(56, 189, 248, 0.35) 100%);
+    color: #f0f9ff;
+    border-color: rgba(186, 230, 253, 0.45);
+}
+
+.alert-toast--nws.alert-toast--nws-heat {
+    background: linear-gradient(135deg, rgba(154, 52, 18, 0.96) 0%, rgba(234, 88, 12, 0.92) 100%);
+    color: #fff7ed;
+    border-color: rgba(254, 215, 170, 0.4);
+}
+
+.alert-toast--nws.alert-toast--nws-fog {
+    background: linear-gradient(135deg, rgba(55, 65, 81, 0.96) 0%, rgba(107, 114, 128, 0.9) 100%);
+    color: #f9fafb;
+    border-color: rgba(209, 213, 219, 0.35);
+}
+
+.alert-toast--nws.alert-toast--nws-rain {
+    background: linear-gradient(135deg, rgba(22, 78, 99, 0.96) 0%, rgba(8, 145, 178, 0.92) 100%);
+    color: #ecfeff;
+    border-color: rgba(165, 243, 252, 0.4);
+}
+
+.alert-toast--nws.alert-toast--nws-wind {
+    background: linear-gradient(135deg, rgba(120, 53, 15, 0.95) 0%, rgba(180, 83, 9, 0.92) 100%);
+    color: #fffbeb;
+    border-color: rgba(253, 230, 138, 0.35);
+}
+
+.alert-toast--nws.alert-toast--nws-warning {
+    background: rgba(194, 65, 12, 0.95);
+    color: #fff7ed;
+}
+
+.alert-toast--nws.alert-toast--nws-advisory {
+    background: rgba(202, 138, 4, 0.95);
+    color: #1c1917;
+    border-color: rgba(0, 0, 0, 0.12);
+}
+
+/* Live station supplement (when NWS list does not mention the same hazard) */
+.alert-toast--live-supplement {
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.45;
+}
+
+.alert-toast--live-supplement.alert-toast--live-default {
+    background: rgba(30, 41, 59, 0.94);
+    color: #e2e8f0;
+    border-color: rgba(148, 163, 184, 0.35);
+}
+
+.alert-toast--live-supplement.alert-toast--live-storm {
+    background: linear-gradient(135deg, rgba(49, 46, 129, 0.95) 0%, rgba(79, 70, 229, 0.9) 100%);
+    color: #eef2ff;
+}
+
+.alert-toast--live-supplement.alert-toast--live-rain {
+    background: linear-gradient(135deg, rgba(21, 94, 117, 0.95) 0%, rgba(14, 165, 233, 0.88) 100%);
+    color: #ecfeff;
+}
+
+.alert-toast--live-supplement.alert-toast--live-fog {
+    background: linear-gradient(135deg, rgba(51, 65, 85, 0.95) 0%, rgba(100, 116, 139, 0.9) 100%);
+    color: #f8fafc;
+}
+
+.alert-toast--live-supplement.alert-toast--live-winter {
+    background: linear-gradient(135deg, rgba(12, 74, 110, 0.95) 0%, rgba(14, 165, 233, 0.35) 100%);
+    color: #f0f9ff;
 }
 
 .alert-toast--leaving {
