@@ -1694,6 +1694,8 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
                 }),
                 attributes: {
                     pointId: point.id,
+                    locationLabel: getCoralGablesAreaLabel(point.id),
+                    locationCoords: `${Number(point.latitude).toFixed(5)}° N, ${Math.abs(Number(point.longitude)).toFixed(5)}° W`,
                     temperature: (point.weatherData.temperature || 0).toFixed(1),
                     feelsLike: (point.weatherData.feelsLike || 0).toFixed(1),
                     humidity: (point.weatherData.humidity || 0).toFixed(0),
@@ -1711,6 +1713,10 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
                 popupTemplate: new PopupTemplate({
                     title: `Weather: ${point.id}`,
                     content: `
+                        <div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(148,163,184,0.35);font-size:12px;line-height:1.45">
+                        <b>Location:</b> {locationLabel}<br>
+                        <b>Coordinates:</b> {locationCoords}
+                        </div>
                         <b>Temperature:</b> {temperature}°F<br>
                         <b>Feels Like:</b> {feelsLike}°F<br>
                         <b>Humidity:</b> {humidity}%<br>
