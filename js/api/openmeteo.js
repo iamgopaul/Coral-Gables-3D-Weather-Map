@@ -3,10 +3,10 @@
  * No API key required, rate limit friendly
  */
 
-const OPEN_METEO_MAX_ATTEMPTS = 4;
+const OPEN_METEO_MAX_ATTEMPTS = 6;
 
 /**
- * Fair-use: retry on HTTP 429 with backoff (and optional Retry-After).
+ * Fair-use: retry on HTTP 429 with backoff (and optional Retry-After seconds).
  * @param {string} url
  * @returns {Promise<Response>}
  */
@@ -14,7 +14,7 @@ async function openMeteoFetch(url) {
     for (let attempt = 0; attempt < OPEN_METEO_MAX_ATTEMPTS; attempt++) {
         const response = await fetch(url);
         if (response.status === 429 && attempt < OPEN_METEO_MAX_ATTEMPTS - 1) {
-            let delayMs = 700 * 2 ** attempt;
+            let delayMs = Math.min(22_000, 1800 * 2 ** attempt);
             const ra = response.headers.get('Retry-After');
             if (ra && /^\d+$/.test(ra.trim())) {
                 delayMs = Math.max(delayMs, parseInt(ra.trim(), 10) * 1000);

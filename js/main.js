@@ -1546,9 +1546,13 @@ async function refreshWeatherData(options = {}) {
         updateLastUpdateTime();
         updateCoralGablesLiveDisplay();
 
-        // Fetch forecasts if not already loaded (non-blocking; errors logged inside fetchForecastData)
+        // Forecast batch hits Open-Meteo per station — delay so it does not overlap the current-weather
+        // burst (reduces HTTP 429 on cold load + historical playback).
         if (!state.forecastData || state.forecastData.length === 0) {
-            void fetchForecastData();
+            void (async () => {
+                await new Promise((r) => setTimeout(r, 2200));
+                await fetchForecastData();
+            })();
         }
 
         await persistWeatherSnapshotAndReloadHistory(weatherResults);
@@ -4372,6 +4376,18 @@ function wireSceneCameraDebugToTerminal(sceneView) {
 }
 
 /**
+ * Only mirror to Vite's `POST /__debug_log` on a local dev host. Production (e.g. vercel.app) has no
+ * middleware — `import.meta.env.DEV` is not enough for every build/host combo, so hostname is the gate.
+ */
+function isDebugLogMirrorHost() {
+    if (typeof window === 'undefined' || !window.location) {
+        return false;
+    }
+    const h = String(window.location.hostname || '').toLowerCase();
+    return h === 'localhost' || h === '127.0.0.1' || h === '[::1]';
+}
+
+/**
  * Debug logging — browser console + terminal when using Vite dev or preview (`run.sh` uses preview).
  * Errors (`isError === true`) use `console.error` and are mirrored to the Node process as stderr via
  * `vite.config.js` → `POST /__debug_log`.
@@ -4383,7 +4399,7 @@ function debugLog(message, isError = false) {
     } else {
         console.log(line);
     }
-    if (typeof fetch === 'undefined' || !import.meta.env.DEV) {
+    if (typeof fetch === 'undefined' || !isDebugLogMirrorHost()) {
         return;
     }
     fetch('/__debug_log', {

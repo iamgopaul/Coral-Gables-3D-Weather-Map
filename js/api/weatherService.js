@@ -456,10 +456,12 @@ export async function fetchBatchHistoricalHourly(samplingPoints, onProgress = nu
         return [];
     }
 
-    const concurrency = Math.max(
-        1,
-        Math.min(Number(CONFIG.HISTORICAL_HOURLY_CONCURRENCY) || 2, n)
-    );
+    const startDelay = Math.max(0, Number(CONFIG.HISTORICAL_HOURLY_BATCH_START_DELAY_MS) || 0);
+    if (startDelay > 0) {
+        await new Promise((r) => setTimeout(r, startDelay));
+    }
+
+    const concurrency = Math.max(1, Math.min(Number(CONFIG.HISTORICAL_HOURLY_CONCURRENCY) || 1, n));
     const waveGap = Number(CONFIG.HISTORICAL_HOURLY_WAVE_GAP_MS) || 0;
     const results = new Array(n);
     let completed = 0;

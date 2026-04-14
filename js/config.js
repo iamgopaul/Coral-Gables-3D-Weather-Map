@@ -157,9 +157,9 @@ export const CONFIG = {
      * Parallel batch weather: how many station fetches run at once (each station still merges Open-Meteo + NOAA in parallel).
      * Higher = faster load; if you see 429/rate errors from an API, lower to 3–4 or set `WEATHER_BATCH_WAVE_GAP_MS` to 40–80.
      */
-    WEATHER_BATCH_CONCURRENCY: 6,
-    /** Optional pause (ms) between concurrency *waves* only — 0 = fastest. */
-    WEATHER_BATCH_WAVE_GAP_MS: 0,
+    WEATHER_BATCH_CONCURRENCY: 3,
+    /** Pause (ms) between concurrency *waves* — spreads Open-Meteo calls to reduce HTTP 429. */
+    WEATHER_BATCH_WAVE_GAP_MS: 120,
     /** If the first full-grid fetch yields zero successes, wait and retry once (helps flaky networks / cold APIs). */
     WEATHER_FETCH_RETRY_DELAY_MS: 1100,
     WEATHER_FETCH_MAX_ATTEMPTS: 2,
@@ -172,8 +172,11 @@ export const CONFIG = {
      * Open-Meteo hourly backfill for playback: keep concurrency low and space waves so bursts
      * (current + forecast + historical) stay under fair-use limits and avoid HTTP 429.
      */
-    HISTORICAL_HOURLY_CONCURRENCY: 2,
-    HISTORICAL_HOURLY_WAVE_GAP_MS: 450,
+    /** Sequential (1) is slowest but safest for Open-Meteo fair-use after current + forecast. */
+    HISTORICAL_HOURLY_CONCURRENCY: 1,
+    HISTORICAL_HOURLY_WAVE_GAP_MS: 750,
+    /** Brief pause before the historical hourly batch so in-flight forecast requests can finish. */
+    HISTORICAL_HOURLY_BATCH_START_DELAY_MS: 900,
 
     // Temperature Visualization Configuration
     /** @deprecated for live grid — main view uses relief mapping below */
