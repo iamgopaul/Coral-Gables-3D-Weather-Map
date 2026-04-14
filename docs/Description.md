@@ -73,16 +73,16 @@ The app is meant to give residents, students, and curious users a **spatial** vi
 
 ## Related documents
 
-| File               | Contents                                     |
-| ------------------ | -------------------------------------------- |
-| `../README.md`     | How to run, configure `.env`, CI, layout     |
-| `USER_MANUAL.md`   | End-user controls and troubleshooting        |
-| `API.md`           | External APIs, endpoints, merge, trust notes |
-| `DEPLOY.md`        | Static hosting checklist                     |
-| `CONTRIBUTING.md`  | Issues, PRs, checks                          |
-| `SECURITY.md`      | Client-side keys, reporting                  |
-| `CHANGELOG.md`     | Release history                              |
-| `ARCHITECTURE.md`  | Data flow and modules                        |
+| File              | Contents                                     |
+| ----------------- | -------------------------------------------- |
+| `../README.md`    | How to run, configure `.env`, CI, layout     |
+| `USER_MANUAL.md`  | End-user controls and troubleshooting        |
+| `API.md`          | External APIs, endpoints, merge, trust notes |
+| `DEPLOY.md`       | Static hosting checklist                     |
+| `CONTRIBUTING.md` | Issues, PRs, checks                          |
+| `SECURITY.md`     | Client-side keys, reporting                  |
+| `CHANGELOG.md`    | Release history                              |
+| `ARCHITECTURE.md` | Data flow and modules                        |
 
 ---
 
