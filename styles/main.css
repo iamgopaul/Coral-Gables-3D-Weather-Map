@@ -30,9 +30,7 @@
     --map-frame-radius: 12px;
     --map-frame-border: 1px solid rgba(var(--ui-accent-rgb), 0.42);
     --map-frame-shadow:
-        0 0 0 1px rgba(0, 0, 0, 0.55),
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        0 0 0 1px rgba(0, 0, 0, 0.55), 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
     /* Panels / floating UI: one step inside the outer frame */
     --ui-overlay-offset: calc(var(--map-frame-inset) + 10px);
     /* Weather Menu — left rail width (map inset uses the same values via :has()) */
@@ -293,8 +291,8 @@ body {
 
 #refreshScanOverlay.refresh-scan-overlay--loading::before {
     opacity: 1;
-    /* Always left → right; each iteration snaps back off the left edge */
-    animation: refreshScanSweep var(--refresh-scan-leg-dur, 6800ms) ease-in-out infinite;
+    /* Linear: ease-in-out made the band nearly stationary at the start of each leg (felt like lag). */
+    animation: refreshScanSweep var(--refresh-scan-leg-dur, 6800ms) linear infinite;
 }
 
 @keyframes refreshScanSweep {
@@ -330,7 +328,9 @@ body {
     color: var(--ui-text);
     border-radius: 8px;
     padding: 12px;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--ui-border);
+    box-shadow:
+        0 8px 28px rgba(0, 0, 0, 0.45),
+        0 0 0 1px var(--ui-border);
     backdrop-filter: blur(14px);
     z-index: 10;
     font-size: 12px;
@@ -374,7 +374,10 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    transition:
+        background 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease;
 }
 
 .panel-minimize-btn:hover {
@@ -462,7 +465,9 @@ body {
 
 .app-page-header:hover {
     border-color: rgba(var(--ui-accent-rgb), 0.36);
-    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42), 0 0 0 2px rgba(var(--ui-accent-rgb), 0.12);
+    box-shadow:
+        0 10px 26px rgba(0, 0, 0, 0.42),
+        0 0 0 2px rgba(var(--ui-accent-rgb), 0.12);
 }
 
 .app-page-header:active {
@@ -819,7 +824,11 @@ body {
     border-radius: 6px;
     font-size: 11px;
     cursor: pointer;
-    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+    transition:
+        background-color 0.15s ease,
+        border-color 0.15s ease,
+        box-shadow 0.15s ease,
+        color 0.15s ease;
 }
 
 /* Dark selects — explicit bg + no native chrome (often renders white) */
@@ -901,7 +910,7 @@ select.lighting-test-hud-select option {
     color: var(--ui-text-muted);
 }
 
-.checkbox-group input[type="checkbox"] {
+.checkbox-group input[type='checkbox'] {
     margin-right: 6px;
     width: 14px;
     height: 14px;
@@ -1326,7 +1335,9 @@ select.lighting-test-hud-select option {
     line-height: 1;
     cursor: pointer;
     opacity: 0.85;
-    transition: background 0.15s ease, opacity 0.15s ease;
+    transition:
+        background 0.15s ease,
+        opacity 0.15s ease;
 }
 
 .alert-toast__dismiss:hover {
@@ -1351,7 +1362,9 @@ select.lighting-test-hud-select option {
     border-radius: 8px;
     text-align: center;
     z-index: 1000;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--ui-border);
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.5),
+        0 0 0 1px var(--ui-border);
     font-size: 12px;
     border: 1px solid var(--ui-border);
 }
@@ -1371,8 +1384,12 @@ select.lighting-test-hud-select option {
 }
 
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 /* Utility Classes */
@@ -1763,9 +1780,7 @@ select.lighting-test-hud-select option {
 
     /* Keep Esri weather widget above the bottom sheet */
     #app:has(#mapTaskbar:not(.panel--minimized)) .esri-weather-widget-host.esri-weather-widget-host--visible {
-        bottom: calc(
-            var(--ui-overlay-offset) + min(56dvh, 440px) + 6px
-        );
+        bottom: calc(var(--ui-overlay-offset) + min(56dvh, 440px) + 6px);
     }
 
     #app:has(#mapTaskbar.panel--minimized) .esri-weather-widget-host.esri-weather-widget-host--visible {

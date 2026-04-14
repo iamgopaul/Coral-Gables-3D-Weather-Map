@@ -23,9 +23,11 @@ export async function fetchCurrentWeather(latitude, longitude) {
             } catch {
                 /* ignore */
             }
-            throw new Error(`OpenWeatherMap current weather: ${response.status}${detail ? ` — ${detail}` : ''}`);
+            throw new Error(
+                `OpenWeatherMap current weather: ${response.status}${detail ? ` — ${detail}` : ''}`
+            );
         }
-        
+
         const data = await response.json();
         return parseOpenWeatherMapData(data);
     } catch (error) {
@@ -60,7 +62,7 @@ export async function fetchForecast(latitude, longitude) {
             }
             throw new Error(`OpenWeatherMap forecast: ${response.status}${detail ? ` — ${detail}` : ''}`);
         }
-        
+
         const data = await response.json();
         return parseForecastData(data);
     } catch (error) {
@@ -81,7 +83,7 @@ function parseOpenWeatherMapData(data) {
         windSpeed: data.wind.speed,
         windDirection: data.wind.deg,
         windGust: data.wind.gust || null,
-        precipitation: data.rain ? (data.rain['1h'] || 0) : 0,
+        precipitation: data.rain ? data.rain['1h'] || 0 : 0,
         cloudCover: data.clouds.all,
         visibility: data.visibility,
         weather: data.weather[0].main.toLowerCase(),
@@ -99,14 +101,14 @@ function parseOpenWeatherMapData(data) {
 function parseForecastData(data) {
     return {
         city: data.city.name,
-        forecasts: data.list.map(item => ({
+        forecasts: data.list.map((item) => ({
             temperature: item.main.temp,
             feelsLike: item.main.feels_like,
             humidity: item.main.humidity,
             pressure: item.main.pressure,
             windSpeed: item.wind.speed,
             windDirection: item.wind.deg,
-            precipitation: item.rain ? (item.rain['3h'] || 0) : 0,
+            precipitation: item.rain ? item.rain['3h'] || 0 : 0,
             cloudCover: item.clouds.all,
             weather: item.weather[0].main.toLowerCase(),
             weatherDescription: item.weather[0].description,
@@ -121,24 +123,28 @@ function parseForecastData(data) {
  * Get forecast for specific time offset (3h or 24h)
  */
 export function getForecastAtOffset(forecastData, hoursAhead) {
-    if (!forecastData || !forecastData.forecasts) {
+    const periods = forecastData?.forecasts;
+    if (!Array.isArray(periods) || periods.length === 0) {
         return null;
     }
-    
-    const targetTime = Date.now() + (hoursAhead * 60 * 60 * 1000);
-    
-    // Find closest forecast
-    let closest = forecastData.forecasts[0];
-    let minDiff = Math.abs(closest.timestamp - targetTime);
-    
-    for (const forecast of forecastData.forecasts) {
-        const diff = Math.abs(forecast.timestamp - targetTime);
-        if (diff < minDiff) {
+
+    const targetTime = Date.now() + hoursAhead * 60 * 60 * 1000;
+
+    let closest = null;
+    let minDiff = Infinity;
+
+    for (const forecast of periods) {
+        const ts = Number(forecast.timestamp);
+        if (!Number.isFinite(ts)) {
+            continue;
+        }
+        const diff = Math.abs(ts - targetTime);
+        if (closest == null || diff < minDiff) {
             minDiff = diff;
             closest = forecast;
         }
     }
-    
+
     return closest;
 }
 
@@ -148,7 +154,7 @@ export function getForecastAtOffset(forecastData, hoursAhead) {
 export async function fetchBatchWeather(samplingPoints) {
     const results = [];
     const delayBetweenRequests = 100; // ms to respect rate limits
-    
+
     for (const point of samplingPoints) {
         try {
             const weatherData = await fetchCurrentWeather(point.latitude, point.longitude);
@@ -156,9 +162,9 @@ export async function fetchBatchWeather(samplingPoints) {
                 pointId: point.id,
                 ...weatherData
             });
-            
+
             // Delay between requests
-            await new Promise(resolve => setTimeout(resolve, delayBetweenRequests));
+            await new Promise((resolve) => setTimeout(resolve, delayBetweenRequests));
         } catch (error) {
             console.error(`Failed to fetch weather for point ${point.id}:`, error);
             results.push({
@@ -167,7 +173,7 @@ export async function fetchBatchWeather(samplingPoints) {
             });
         }
     }
-    
+
     return results;
 }
 
@@ -177,7 +183,7 @@ export async function fetchBatchWeather(samplingPoints) {
 export async function fetchBatchForecast(samplingPoints) {
     const results = [];
     const delayBetweenRequests = 100;
-    
+
     for (const point of samplingPoints) {
         try {
             const forecastData = await fetchForecast(point.latitude, point.longitude);
@@ -185,8 +191,8 @@ export async function fetchBatchForecast(samplingPoints) {
                 pointId: point.id,
                 ...forecastData
             });
-            
-            await new Promise(resolve => setTimeout(resolve, delayBetweenRequests));
+
+            await new Promise((resolve) => setTimeout(resolve, delayBetweenRequests));
         } catch (error) {
             console.error(`Failed to fetch forecast for point ${point.id}:`, error);
             results.push({
@@ -195,6 +201,6 @@ export async function fetchBatchForecast(samplingPoints) {
             });
         }
     }
-    
+
     return results;
 }

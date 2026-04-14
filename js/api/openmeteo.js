@@ -8,14 +8,14 @@
  */
 export async function fetchCurrentWeather(latitude, longitude) {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,cloud_cover,visibility&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
-    
+
     try {
         const response = await fetch(url);
-        
+
         if (!response.ok) {
             throw new Error(`Open-Meteo API error: ${response.status}`);
         }
-        
+
         const data = await response.json();
         return parseOpenMeteoData(data);
     } catch (error) {
@@ -54,7 +54,7 @@ function getWeatherDescription(code) {
         96: { weather: 'thunderstorm', description: 'Thunderstorm with slight hail' },
         99: { weather: 'thunderstorm', description: 'Thunderstorm with heavy hail' }
     };
-    
+
     return weatherMap[code] || { weather: 'unknown', description: 'Unknown conditions' };
 }
 
@@ -64,7 +64,7 @@ function getWeatherDescription(code) {
 function parseOpenMeteoData(data) {
     const current = data.current;
     const weatherInfo = getWeatherDescription(current.weather_code);
-    
+
     return {
         temperature: current.temperature_2m,
         feelsLike: current.apparent_temperature,
@@ -87,15 +87,15 @@ function parseOpenMeteoData(data) {
  * Fetch forecast data from Open-Meteo
  */
 export async function fetchForecast(latitude, longitude) {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=3`;
-    
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=3`;
+
     try {
         const response = await fetch(url);
-        
+
         if (!response.ok) {
             throw new Error(`Open-Meteo Forecast API error: ${response.status}`);
         }
-        
+
         const data = await response.json();
         return parseForecastData(data);
     } catch (error) {
@@ -110,15 +110,20 @@ export async function fetchForecast(latitude, longitude) {
 function parseForecastData(data) {
     const hourly = data.hourly;
     const forecasts = [];
-    
+
     // Create 3-hour forecast intervals from hourly data
     for (let i = 0; i < hourly.time.length; i += 3) {
         const weatherInfo = getWeatherDescription(hourly.weather_code[i]);
-        
+
+        const pMsl = hourly.pressure_msl?.[i];
         forecasts.push({
             temperature: hourly.temperature_2m[i],
             feelsLike: hourly.temperature_2m[i], // Open-Meteo doesn't provide feels_like in forecast
             humidity: hourly.relative_humidity_2m[i],
+            pressure:
+                pMsl != null && pMsl !== undefined && !Number.isNaN(Number(pMsl))
+                    ? Math.round(Number(pMsl))
+                    : null,
             windSpeed: hourly.wind_speed_10m[i],
             windDirection: hourly.wind_direction_10m[i],
             windGust: hourly.wind_gusts_10m[i],
@@ -128,7 +133,7 @@ function parseForecastData(data) {
             timestamp: new Date(hourly.time[i]).getTime()
         });
     }
-    
+
     return {
         forecasts: forecasts,
         source: 'Open-Meteo'

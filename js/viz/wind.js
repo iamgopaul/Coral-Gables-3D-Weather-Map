@@ -69,10 +69,7 @@ function getMeanWindFromSamplingPoints(samplingPoints) {
         if (!Number.isFinite(speed) || speed <= 0) {
             continue;
         }
-        const deg =
-            typeof rawDir === 'number' && Number.isFinite(rawDir)
-                ? rawDir
-                : Number(rawDir);
+        const deg = typeof rawDir === 'number' && Number.isFinite(rawDir) ? rawDir : Number(rawDir);
         if (!Number.isFinite(deg)) {
             continue;
         }
@@ -114,151 +111,159 @@ export function renderWindVectors({ samplingPoints, layersOverride = null, state
     const maxGridLenDeg = 0.003;
     const gridRefSpeedMph = 40;
 
-    // ArcGIS JS API is loaded globally from <script src="https://js.arcgis.com/…">.
-    // eslint-disable-next-line no-undef
-    require(
-        [
-            'esri/Graphic',
-            'esri/geometry/Polyline',
-            'esri/symbols/LineSymbol3D',
-            'esri/symbols/LineSymbol3DLayer',
-            'esri/PopupTemplate'
-        ],
-        (Graphic, Polyline, LineSymbol3D, LineSymbol3DLayer, PopupTemplate) => {
-            try {
-                layers.wind.removeAll();
-                let vectorsAdded = 0;
+    // ArcGIS JS API is loaded globally from the js.arcgis.com script tag.
+    require([
+        'esri/Graphic',
+        'esri/geometry/Polyline',
+        'esri/symbols/LineSymbol3D',
+        'esri/symbols/LineSymbol3DLayer',
+        'esri/PopupTemplate'
+    ], (Graphic, Polyline, LineSymbol3D, LineSymbol3DLayer, PopupTemplate) => {
+        try {
+            layers.wind.removeAll();
+            let vectorsAdded = 0;
 
-                samplingPoints.forEach((point) => {
-                    if (!point || !point.weatherData) return;
-                    const ws = point.weatherData.windSpeed;
-                    if (ws == null || ws === '' || Number(ws) <= 0) return;
+            samplingPoints.forEach((point) => {
+                if (!point || !point.weatherData) return;
+                const ws = point.weatherData.windSpeed;
+                if (ws == null || ws === '' || Number(ws) <= 0) return;
 
-                    try {
-                        const windSpeed = Number(ws);
-                        const windFromDeg = Number(point.weatherData.windDirection) || 0;
-                        // Downwind direction (where air is moving); “wind from” is meteorological convention.
-                        const downDeg = (windFromDeg + 180) % 360;
-                        const directionRad = (downDeg * Math.PI) / 180;
+                try {
+                    const windSpeed = Number(ws);
+                    const windFromDeg = Number(point.weatherData.windDirection) || 0;
+                    // Downwind direction (where air is moving); “wind from” is meteorological convention.
+                    const downDeg = (windFromDeg + 180) % 360;
+                    const directionRad = (downDeg * Math.PI) / 180;
 
-                        const arrowLength = Math.min(maxGridLenDeg, (windSpeed / gridRefSpeedMph) * maxGridLenDeg);
-                        const endLat = point.latitude + arrowLength * Math.cos(directionRad);
-                        const endLon = point.longitude + arrowLength * Math.sin(directionRad);
+                    const arrowLength = Math.min(
+                        maxGridLenDeg,
+                        (windSpeed / gridRefSpeedMph) * maxGridLenDeg
+                    );
+                    const endLat = point.latitude + arrowLength * Math.cos(directionRad);
+                    const endLon = point.longitude + arrowLength * Math.sin(directionRad);
 
-                        const windColor = windVectorLineColor(windSpeed);
-                        const lineWidthPx = Math.max(1.25, Math.min(6, windSpeed / 6.5));
+                    const windColor = windVectorLineColor(windSpeed);
+                    const lineWidthPx = Math.max(1.25, Math.min(6, windSpeed / 6.5));
 
-                        const polyline = new Polyline({
-                            paths: [[[point.longitude, point.latitude, gridWindZ], [endLon, endLat, gridWindZ]]],
-                            spatialReference: { wkid: 4326 }
-                        });
-
-                        const lineSymbol = new LineSymbol3D({
-                            symbolLayers: [
-                                new LineSymbol3DLayer({
-                                    material: { color: windColor },
-                                    size: lineWidthPx,
-                                    cap: 'round',
-                                    join: 'round',
-                                    marker: { type: 'style', style: 'arrow', placement: 'end' }
-                                })
+                    const polyline = new Polyline({
+                        paths: [
+                            [
+                                [point.longitude, point.latitude, gridWindZ],
+                                [endLon, endLat, gridWindZ]
                             ]
-                        });
-
-                        const fromLabel = windDirectionToCompass16(windFromDeg);
-                        const fromDegStr = String(Math.round(((windFromDeg % 360) + 360) % 360));
-
-                        const graphic = new Graphic({
-                            geometry: polyline,
-                            symbol: lineSymbol,
-                            attributes: {
-                                pointId: point.id ?? '—',
-                                windSpeedMph: windSpeed.toFixed(1),
-                                windFromLabel: fromLabel,
-                                windFromDegrees: fromDegStr
-                            },
-                            popupTemplate: new PopupTemplate({
-                                title: 'Wind · {pointId}',
-                                content:
-                                    '<div style="font-size:13px;line-height:1.45">' +
-                                    '<div><b>{windSpeedMph}</b> mph</div>' +
-                                    '<div>From <b>{windFromLabel}</b> ({windFromDegrees}°)</div>' +
-                                    '<div style="opacity:0.75;font-size:11px;margin-top:6px">Arrow points downwind (flow direction).</div>' +
-                                    '</div>'
-                            })
-                        });
-
-                        layers.wind.add(graphic);
-                        vectorsAdded++;
-                    } catch (err) {
-                        console.error('Error adding wind vector:', err);
-                    }
-                });
-
-                /** City-scale indicator at {@link CONFIG.CORAL_GABLES_CENTER} — area mean, not the center station. */
-                const cgWind = getMeanWindFromSamplingPoints(samplingPoints);
-                if (cgWind && cgWind.speed > 0) {
-                    const { speed: cgSpeed, fromDeg: cgFrom } = cgWind;
-                    const downDeg = (cgFrom + 180) % 360;
-                    const rad = (downDeg * Math.PI) / 180;
-                    const z = CONFIG.CORAL_GABLES_WIND_ARROW_Z_METERS;
-                    const maxLen = CONFIG.CORAL_GABLES_WIND_ARROW_MAX_LEN_DEG;
-                    const len = Math.min(maxLen, (cgSpeed / gridRefSpeedMph) * maxLen);
-                    const lat0 = CONFIG.CORAL_GABLES_CENTER.latitude;
-                    const lon0 = CONFIG.CORAL_GABLES_CENTER.longitude;
-                    const endLat = lat0 + len * Math.cos(rad);
-                    const endLon = lon0 + len * Math.sin(rad);
-                    const cgColor = windVectorLineColor(cgSpeed);
-                    const cgWidth = Math.max(2, Math.min(10, cgSpeed / 4));
-
-                    const cgPoly = new Polyline({
-                        paths: [[[lon0, lat0, z], [endLon, endLat, z]]],
+                        ],
                         spatialReference: { wkid: 4326 }
                     });
-                    const cgSymbol = new LineSymbol3D({
+
+                    const lineSymbol = new LineSymbol3D({
                         symbolLayers: [
                             new LineSymbol3DLayer({
-                                material: { color: cgColor },
-                                size: cgWidth,
+                                material: { color: windColor },
+                                size: lineWidthPx,
                                 cap: 'round',
                                 join: 'round',
                                 marker: { type: 'style', style: 'arrow', placement: 'end' }
                             })
                         ]
                     });
-                    const compass = windDirectionToCompass16(cgFrom);
-                    const cgGraphic = new Graphic({
-                        geometry: cgPoly,
-                        symbol: cgSymbol,
+
+                    const fromLabel = windDirectionToCompass16(windFromDeg);
+                    const fromDegStr = String(Math.round(((windFromDeg % 360) + 360) % 360));
+
+                    const graphic = new Graphic({
+                        geometry: polyline,
+                        symbol: lineSymbol,
                         attributes: {
-                            kind: 'coral-gables-wind',
-                            windSpeedMph: cgSpeed.toFixed(1),
-                            windFromDegrees: String(Math.round(((cgFrom % 360) + 360) % 360)),
-                            windFromLabel: compass
+                            pointId: point.id ?? '—',
+                            windSpeedMph: windSpeed.toFixed(1),
+                            windFromLabel: fromLabel,
+                            windFromDegrees: fromDegStr
                         },
                         popupTemplate: new PopupTemplate({
-                            title: 'Area wind (mean of stations)',
+                            title: 'Wind · {pointId}',
                             content:
                                 '<div style="font-size:13px;line-height:1.45">' +
-                                '<div><b>{windSpeedMph}</b> mph resultant</div>' +
+                                '<div><b>{windSpeedMph}</b> mph</div>' +
                                 '<div>From <b>{windFromLabel}</b> ({windFromDegrees}°)</div>' +
-                                '<div style="opacity:0.75;font-size:11px;margin-top:6px">Vector average of all grid sampling points. Arrow shows downwind.</div>' +
+                                '<div style="opacity:0.75;font-size:11px;margin-top:6px">Arrow points downwind (flow direction).</div>' +
                                 '</div>'
                         })
                     });
-                    layers.wind.add(cgGraphic);
-                }
 
-                if (vectorsAdded > 0 || (cgWind && cgWind.speed > 0)) {
-                    debugLog?.(
-                        `💨 Wind vectors: ${vectorsAdded} field arrows` +
-                            (cgWind && cgWind.speed > 0 ? ' + area-mean wind (city marker)' : '')
-                    );
+                    layers.wind.add(graphic);
+                    vectorsAdded++;
+                } catch (err) {
+                    console.error('Error adding wind vector:', err);
                 }
-            } catch (windErr) {
-                console.error('Wind rendering error:', windErr);
+            });
+
+            /** City-scale indicator at {@link CONFIG.CORAL_GABLES_CENTER} — area mean, not the center station. */
+            const cgWind = getMeanWindFromSamplingPoints(samplingPoints);
+            if (cgWind && cgWind.speed > 0) {
+                const { speed: cgSpeed, fromDeg: cgFrom } = cgWind;
+                const downDeg = (cgFrom + 180) % 360;
+                const rad = (downDeg * Math.PI) / 180;
+                const z = CONFIG.CORAL_GABLES_WIND_ARROW_Z_METERS;
+                const maxLen = CONFIG.CORAL_GABLES_WIND_ARROW_MAX_LEN_DEG;
+                const len = Math.min(maxLen, (cgSpeed / gridRefSpeedMph) * maxLen);
+                const lat0 = CONFIG.CORAL_GABLES_CENTER.latitude;
+                const lon0 = CONFIG.CORAL_GABLES_CENTER.longitude;
+                const endLat = lat0 + len * Math.cos(rad);
+                const endLon = lon0 + len * Math.sin(rad);
+                const cgColor = windVectorLineColor(cgSpeed);
+                const cgWidth = Math.max(2, Math.min(10, cgSpeed / 4));
+
+                const cgPoly = new Polyline({
+                    paths: [
+                        [
+                            [lon0, lat0, z],
+                            [endLon, endLat, z]
+                        ]
+                    ],
+                    spatialReference: { wkid: 4326 }
+                });
+                const cgSymbol = new LineSymbol3D({
+                    symbolLayers: [
+                        new LineSymbol3DLayer({
+                            material: { color: cgColor },
+                            size: cgWidth,
+                            cap: 'round',
+                            join: 'round',
+                            marker: { type: 'style', style: 'arrow', placement: 'end' }
+                        })
+                    ]
+                });
+                const compass = windDirectionToCompass16(cgFrom);
+                const cgGraphic = new Graphic({
+                    geometry: cgPoly,
+                    symbol: cgSymbol,
+                    attributes: {
+                        kind: 'coral-gables-wind',
+                        windSpeedMph: cgSpeed.toFixed(1),
+                        windFromDegrees: String(Math.round(((cgFrom % 360) + 360) % 360)),
+                        windFromLabel: compass
+                    },
+                    popupTemplate: new PopupTemplate({
+                        title: 'Area wind (mean of stations)',
+                        content:
+                            '<div style="font-size:13px;line-height:1.45">' +
+                            '<div><b>{windSpeedMph}</b> mph resultant</div>' +
+                            '<div>From <b>{windFromLabel}</b> ({windFromDegrees}°)</div>' +
+                            '<div style="opacity:0.75;font-size:11px;margin-top:6px">Vector average of all grid sampling points. Arrow shows downwind.</div>' +
+                            '</div>'
+                    })
+                });
+                layers.wind.add(cgGraphic);
             }
-        }
-    );
-}
 
+            if (vectorsAdded > 0 || (cgWind && cgWind.speed > 0)) {
+                debugLog?.(
+                    `💨 Wind vectors: ${vectorsAdded} field arrows` +
+                        (cgWind && cgWind.speed > 0 ? ' + area-mean wind (city marker)' : '')
+                );
+            }
+        } catch (windErr) {
+            console.error('Wind rendering error:', windErr);
+        }
+    });
+}

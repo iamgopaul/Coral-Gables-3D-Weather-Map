@@ -5,11 +5,7 @@ import * as DB from './storage/db.js';
 import { generateGridCells } from './utils/gridGenerator.js';
 import { renderWindVectors, windDirectionToCompass16 } from './viz/wind.js';
 import { collectActiveApiSourcesForFrame, updateDataSourceDisplay } from './ui/dataStatus.js';
-import {
-    classicReliefTempRgb,
-    temperatureToColor,
-    tempGradientCssLinear
-} from './utils/tempColors.js';
+import { classicReliefTempRgb, temperatureToColor, tempGradientCssLinear } from './utils/tempColors.js';
 import { interpolateGrid, interpolate } from './utils/interpolation.js';
 import * as TimeFeatures from './features/timeFeatures.js';
 import {
@@ -141,19 +137,33 @@ async function init() {
     try {
         showLoading(true, 'Initializing...');
         debugLog('🚀 Application starting...');
-        
+
         // Initialize IndexedDB
         await DB.initDB();
         debugLog('✓ Database initialized');
-        
+
         // Generate sampling points
         state.samplingPoints = generateSamplingPoints();
         debugLog(`✓ Generated ${state.samplingPoints.length} sampling points`);
-        
+
         // Generate grid cells
         state.gridCells = generateGridCells();
         debugLog(`✓ Generated ${state.gridCells.length} grid cells`);
-        
+
+        /** Overlap with ArcGIS: station + grid fetch runs while the WebScene loads (parallel batches). */
+        const weatherPrefetchPromise = fetchWeatherFrameCore(null);
+
+        /** Historical list for playback UI — loads in parallel; does not block scene or first weather paint. */
+        void TimeFeatures.getHistoricalSnapshots()
+            .then((snaps) => {
+                state.historicalSnapshots = snaps;
+                updateSnapshotCount();
+                debugLog(`✓ Loaded ${state.historicalSnapshots.length} historical snapshots`);
+            })
+            .catch(() => {
+                debugLog('⚠ No historical data yet (this is normal on first run)');
+            });
+
         // Initialize ArcGIS Scene
         await initArcGIS();
         debugLog('✓ ArcGIS initialized');
@@ -163,8 +173,8 @@ async function init() {
         }
 
         // Wait a brief moment for layers to be fully ready
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
         // Show grid IMMEDIATELY with default colors (GUARANTEED VISIBILITY)
         debugLog('📊 Showing initial grid...');
         try {
@@ -174,43 +184,34 @@ async function init() {
             console.error('Grid display error:', gridError);
             debugLog('✗ Grid display failed: ' + gridError.message, true);
         }
-        
-        // Load historical snapshots
-        try {
-            state.historicalSnapshots = await TimeFeatures.getHistoricalSnapshots();
-            debugLog(`✓ Loaded ${state.historicalSnapshots.length} historical snapshots`);
-            updateSnapshotCount();
-        } catch (err) {
-            debugLog('⚠ No historical data yet (this is normal on first run)');
-        }
-        
-        // Fetch initial weather data — no fullscreen weather loader; CSS sweep is the load cue (same as periodic refresh)
+
+        // Apply initial weather (prefetch may already be done; CSS sweep covers load)
         try {
             showLoading(false);
-            await refreshWeatherData();
+            const preloaded = await weatherPrefetchPromise;
+            await refreshWeatherData({ preloaded });
             debugLog('✓ Initial weather data loaded');
             scheduleWelcomeWeatherToast();
         } catch (refreshErr) {
             debugLog('⚠ Initial weather fetch failed, grid showing with defaults', true);
             scheduleWelcomeWeatherToast();
         }
-        
+
         // Setup UI event listeners
         setupEventListeners();
         debugLog('✓ Event listeners setup');
-        
+
         // Start auto-refresh timers
         startAutoRefresh();
         debugLog('✓ Auto-refresh started');
-        
+
         showLoading(false); // in case refreshWeatherData left it on
         debugLog('🎉 Application initialized successfully!');
         debugLog('Grid should be visible now!');
-        
     } catch (error) {
         console.error('Failed to initialize application:', error);
         debugLog('✗ Critical error: ' + error.message, true);
-        
+
         showError('Initialization error. Please refresh the page.');
         showLoading(false);
     }
@@ -227,107 +228,111 @@ function showImmediateGrid() {
         return;
     }
     state.isShowingGrid = true;
-    
-    require(['esri/Graphic', 'esri/geometry/Polygon', 'esri/symbols/SimpleFillSymbol', 'esri/PopupTemplate'],
-        (Graphic, Polygon, SimpleFillSymbol, PopupTemplate) => {
-            
-            try {
-                if (!state.layers || !state.layers.grid) {
-                    debugLog('⚠ Grid layer not ready yet, retrying in 500ms...');
-                    state.isShowingGrid = false;
-                    setTimeout(showImmediateGrid, 500);
-                    return;
-                }
-                
-                debugLog('🎨 Adding grid cells...');
-                state.layers.grid.removeAll();
 
-                let minT = Infinity;
-                let maxT = -Infinity;
-                for (const c of state.gridCells) {
-                    const t = c.interpolatedData?.temperature;
-                    if (t != null && !Number.isNaN(t)) {
-                        minT = Math.min(minT, t);
-                        maxT = Math.max(maxT, t);
-                    }
+    require([
+        'esri/Graphic',
+        'esri/geometry/Polygon',
+        'esri/symbols/SimpleFillSymbol',
+        'esri/PopupTemplate'
+    ], (Graphic, Polygon, SimpleFillSymbol, PopupTemplate) => {
+        try {
+            if (!state.layers || !state.layers.grid) {
+                debugLog('⚠ Grid layer not ready yet, retrying in 500ms...');
+                state.isShowingGrid = false;
+                setTimeout(showImmediateGrid, 500);
+                return;
+            }
+
+            debugLog('🎨 Adding grid cells...');
+            state.layers.grid.removeAll();
+
+            let minT = Infinity;
+            let maxT = -Infinity;
+            for (const c of state.gridCells) {
+                const t = c.interpolatedData?.temperature;
+                if (t != null && !Number.isNaN(t)) {
+                    minT = Math.min(minT, t);
+                    maxT = Math.max(maxT, t);
                 }
-                const range = maxT > minT ? maxT - minT : 0;
-                const hasFrameTemps = range > 0;
-                
-                let added = 0;
-                let failed = 0;
-                
-                state.gridCells.forEach((cell, index) => {
-                    try {
-                        const row = cell.row || 0;
-                        const col = cell.col || 0;
-                        const elevation = (row * 100) + (col * 80) + 500; // Much higher!
-                        const tCell = cell.interpolatedData?.temperature;
-                        const color =
-                            hasFrameTemps && tCell != null && !Number.isNaN(tCell)
-                                ? classicReliefTempRgb(tCell, minT, maxT, range)
-                                : temperatureToColor(
-                                      tCell != null && !Number.isNaN(tCell) ? tCell : 72
-                                  );
-                        
-                        const polygon = new Polygon({
-                            rings: [[
+            }
+            const range = maxT > minT ? maxT - minT : 0;
+            const hasFrameTemps = range > 0;
+
+            let added = 0;
+            let failed = 0;
+
+            state.gridCells.forEach((cell, index) => {
+                try {
+                    const row = cell.row || 0;
+                    const col = cell.col || 0;
+                    const elevation = row * 100 + col * 80 + 500; // Much higher!
+                    const tCell = cell.interpolatedData?.temperature;
+                    const color =
+                        hasFrameTemps && tCell != null && !Number.isNaN(tCell)
+                            ? classicReliefTempRgb(tCell, minT, maxT, range)
+                            : temperatureToColor(tCell != null && !Number.isNaN(tCell) ? tCell : 72);
+
+                    const polygon = new Polygon({
+                        rings: [
+                            [
                                 [cell.bounds.west, cell.bounds.south, elevation],
                                 [cell.bounds.east, cell.bounds.south, elevation],
                                 [cell.bounds.east, cell.bounds.north, elevation],
                                 [cell.bounds.west, cell.bounds.north, elevation],
                                 [cell.bounds.west, cell.bounds.south, elevation]
-                            ]],
-                            spatialReference: { wkid: 4326 }
-                        });
-                        
-                        const graphic = new Graphic({
-                            geometry: polygon,
-                            symbol: new SimpleFillSymbol({
-                                color: [...color, 0], // 100% transparent
-                                outline: {
-                                    color: [...color, CONFIG.BASIC_GRID_OUTLINE_ALPHA ?? 118],
-                                    width: 2
-                                }
-                            }),
-                            attributes: {
-                                row: row,
-                                col: col,
-                                elevation: elevation,
-                                defaultColor: true
-                            },
-                            popupTemplate: new PopupTemplate({
-                                title: `Grid Cell [${row}, ${col}]`,
-                                content: `<b>Position:</b> Row ${row}, Col ${col}<br><b>Elevation:</b> ${elevation}m<br><i>Loading weather data...</i>`
-                            })
-                        });
-                        
-                        state.layers.grid.add(graphic);
-                        added++;
-                    } catch (cellErr) {
-                        failed++;
-                        console.error(`Error adding cell ${index}:`, cellErr);
-                    }
-                });
-                
-                debugLog(`✓ GRID VISIBLE: ${added} cells added` + (failed > 0 ? `, ${failed} failed` : ''));
-                console.log(`%c🎨 GRID IS NOW VISIBLE! ${added} colorful cells added`, 'color: green; font-weight: bold; font-size: 14px');
-                if (isTidefieldMembraneActive()) {
-                    afterGridRebuild('main', state.samplingPoints);
+                            ]
+                        ],
+                        spatialReference: { wkid: 4326 }
+                    });
+
+                    const graphic = new Graphic({
+                        geometry: polygon,
+                        symbol: new SimpleFillSymbol({
+                            color: [...color, 0], // 100% transparent
+                            outline: {
+                                color: [...color, CONFIG.BASIC_GRID_OUTLINE_ALPHA ?? 118],
+                                width: 2
+                            }
+                        }),
+                        attributes: {
+                            row: row,
+                            col: col,
+                            elevation: elevation,
+                            defaultColor: true
+                        },
+                        popupTemplate: new PopupTemplate({
+                            title: `Grid Cell [${row}, ${col}]`,
+                            content: `<b>Position:</b> Row ${row}, Col ${col}<br><b>Elevation:</b> ${elevation}m<br><i>Loading weather data...</i>`
+                        })
+                    });
+
+                    state.layers.grid.add(graphic);
+                    added++;
+                } catch (cellErr) {
+                    failed++;
+                    console.error(`Error adding cell ${index}:`, cellErr);
                 }
-                state.isShowingGrid = false;
-                
-            } catch (err) {
-                console.error('Error in showImmediateGrid:', err);
-                debugLog('✗ Grid rendering error: ' + err.message, true);
-                state.isShowingGrid = false;
+            });
+
+            debugLog(`✓ GRID VISIBLE: ${added} cells added` + (failed > 0 ? `, ${failed} failed` : ''));
+            console.log(
+                `%c🎨 GRID IS NOW VISIBLE! ${added} colorful cells added`,
+                'color: green; font-weight: bold; font-size: 14px'
+            );
+            if (isTidefieldMembraneActive()) {
+                afterGridRebuild('main', state.samplingPoints);
             }
-        },
-        (error) => {
-            console.error('Error loading ArcGIS modules for grid:', error);
-            debugLog('✗ Failed to load ArcGIS modules: ' + error.message, true);
             state.isShowingGrid = false;
-        });
+        } catch (err) {
+            console.error('Error in showImmediateGrid:', err);
+            debugLog('✗ Grid rendering error: ' + err.message, true);
+            state.isShowingGrid = false;
+        }
+    }, (error) => {
+        console.error('Error loading ArcGIS modules for grid:', error);
+        debugLog('✗ Failed to load ArcGIS modules: ' + error.message, true);
+        state.isShowingGrid = false;
+    });
 }
 
 /**
@@ -372,10 +377,7 @@ function canonicalSceneWeatherMode(mode) {
  * Pick merged API weather nearest Coral Gables center (representative for scene sky).
  */
 function pickRepresentativeWeatherSampleFromPoints(points) {
-    if (
-        state.coralGablesLiveWeather &&
-        typeof state.coralGablesLiveWeather.temperature === 'number'
-    ) {
+    if (state.coralGablesLiveWeather && typeof state.coralGablesLiveWeather.temperature === 'number') {
         return state.coralGablesLiveWeather;
     }
     if (!points || !points.length) {
@@ -521,7 +523,9 @@ function buildSceneWeather(mode) {
         case 'cloudy':
             return Cloudy ? new Cloudy({ cloudCover: 0.5 }) : new Sunny({ cloudCover: 0.5 });
         case 'rainy':
-            return Rainy ? new Rainy({ cloudCover: 0.44, precipitation: 0.36 }) : new Sunny({ cloudCover: 0.3 });
+            return Rainy
+                ? new Rainy({ cloudCover: 0.44, precipitation: 0.36 })
+                : new Sunny({ cloudCover: 0.3 });
         case 'snowy':
             return Snowy
                 ? new Snowy({
@@ -631,9 +635,7 @@ function applySceneEnvironment(view) {
     try {
         const vm = state.weatherWidget?.viewModel;
         const useWidgetVm =
-            vm &&
-            typeof vm.setWeatherByType === 'function' &&
-            state.weatherWidget?.view === view;
+            vm && typeof vm.setWeatherByType === 'function' && state.weatherWidget?.view === view;
         if (useWidgetVm) {
             vm.setWeatherByType(mode);
             mergeSceneWeatherPreset(view, weatherPreset);
@@ -661,9 +663,7 @@ function applySceneEnvironment(view) {
             view.environment = newEnv;
             const vm = state.weatherWidget?.viewModel;
             const useWidgetVm =
-                vm &&
-                typeof vm.setWeatherByType === 'function' &&
-                state.weatherWidget?.view === view;
+                vm && typeof vm.setWeatherByType === 'function' && state.weatherWidget?.view === view;
             if (useWidgetVm) {
                 vm.setWeatherByType(mode);
                 mergeSceneWeatherPreset(view, weatherPreset);
@@ -875,7 +875,10 @@ async function initArcGIS() {
 
                     map.when().catch((err) => {
                         console.error('WebScene load error:', err);
-                        debugLog('✗ WebScene failed: ' + (err && err.message ? err.message : String(err)), true);
+                        debugLog(
+                            '✗ WebScene failed: ' + (err && err.message ? err.message : String(err)),
+                            true
+                        );
                     });
 
                     debugLog('Creating scene view...');
@@ -902,7 +905,10 @@ async function initArcGIS() {
                                   latitude: ic.latitude,
                                   z: ic.z
                               },
-                              heading: typeof ic.heading === 'number' && Number.isFinite(ic.heading) ? ic.heading : 0,
+                              heading:
+                                  typeof ic.heading === 'number' && Number.isFinite(ic.heading)
+                                      ? ic.heading
+                                      : 0,
                               tilt: typeof ic.tilt === 'number' && Number.isFinite(ic.tilt) ? ic.tilt : 45
                           }
                         : {
@@ -1189,7 +1195,10 @@ async function initArcGIS() {
                     debugLog('SceneView ready!');
                     wireSceneCameraDebugToTerminal(state.sceneView);
                     try {
-                        if (state.sceneView?.viewpoint && typeof state.sceneView.viewpoint.clone === 'function') {
+                        if (
+                            state.sceneView?.viewpoint &&
+                            typeof state.sceneView.viewpoint.clone === 'function'
+                        ) {
                             state.startViewpoint = state.sceneView.viewpoint.clone();
                         }
                     } catch (e) {
@@ -1260,65 +1269,153 @@ function stopGlobalRefreshScanWhileLoading() {
 }
 
 /**
- * Refresh weather data from APIs
+ * Two animation frames so the browser can paint (overlay, SceneView) before rebuilding many GraphicsLayer graphics.
  */
-async function refreshWeatherData() {
+function yieldToBrowserForPaint() {
+    return new Promise((resolve) => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => resolve());
+        });
+    });
+}
+
+/**
+ * Run non-urgent follow-up work after the main thread is idle (alerts, toasts).
+ */
+function scheduleIdleCallback(fn) {
+    if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(
+            () => {
+                fn();
+            },
+            { timeout: 2500 }
+        );
+    } else {
+        setTimeout(fn, 0);
+    }
+}
+
+/**
+ * Coral Gables center + all stations (parallel batches + optional retry). Used by refresh and startup overlap.
+ * @param {(done: number, total: number) => void} [onProgress]
+ * @returns {Promise<{ canonicalCoralGables: object|null, weatherResults: object[] }>}
+ */
+async function fetchWeatherFrameCore(onProgress) {
+    let canonicalCoralGables = null;
     try {
-        debugLog('Fetching weather for ' + state.samplingPoints.length + ' points...');
+        canonicalCoralGables = await WeatherService.fetchCurrentWeather(
+            CONFIG.CORAL_GABLES_CENTER.latitude,
+            CONFIG.CORAL_GABLES_CENTER.longitude,
+            { mergePriority: WeatherService.MERGE_PRIORITY_NOAA_FIRST }
+        );
+    } catch (cgErr) {
+        debugLog(
+            '⚠ Coral Gables (NWS-priority) fetch failed: ' +
+                (cgErr && cgErr.message ? cgErr.message : String(cgErr)),
+            true
+        );
+    }
 
-        startGlobalRefreshScanWhileLoading();
+    const maxAttempts = Math.max(1, Number(CONFIG.WEATHER_FETCH_MAX_ATTEMPTS) || 2);
+    const retryDelay = Math.max(0, Number(CONFIG.WEATHER_FETCH_RETRY_DELAY_MS) || 1100);
+    let weatherResults = [];
 
-        state.coralGablesLiveWeather = null;
-
-        /** NWS-first merge at the official map center — matches local “live” Coral Gables conditions */
-        let canonicalCoralGables = null;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
-            canonicalCoralGables = await WeatherService.fetchCurrentWeather(
-                CONFIG.CORAL_GABLES_CENTER.latitude,
-                CONFIG.CORAL_GABLES_CENTER.longitude,
-                { mergePriority: WeatherService.MERGE_PRIORITY_NOAA_FIRST }
-            );
-            state.coralGablesLiveWeather = canonicalCoralGables;
-        } catch (cgErr) {
-            debugLog(
-                '⚠ Coral Gables (NWS-priority) fetch failed: ' + (cgErr && cgErr.message ? cgErr.message : String(cgErr)),
-                true
-            );
-        }
-
-        // Fetch current weather
-        let weatherResults = [];
-        try {
-            weatherResults = await WeatherService.fetchBatchWeather(
-                state.samplingPoints,
-                (current, total) => {
-                    updateProgress(current, total);
-                },
-                {
-                    mergePriority: WeatherService.MERGE_PRIORITY_DEFAULT,
-                    centerWeather: canonicalCoralGables,
-                    centerPointId: 'center'
-                }
-            );
+            weatherResults = await WeatherService.fetchBatchWeather(state.samplingPoints, onProgress, {
+                mergePriority: WeatherService.MERGE_PRIORITY_DEFAULT,
+                centerWeather: canonicalCoralGables,
+                centerPointId: 'center'
+            });
         } catch (fetchError) {
             console.error('Weather fetch failed:', fetchError);
             debugLog('⚠ Weather API error: ' + fetchError.message, true);
             weatherResults = [];
         }
-        
+
         if (!weatherResults || !Array.isArray(weatherResults)) {
             weatherResults = [];
         }
-        
-        const successful = weatherResults.filter(r => r && r.success).length;
-        const failed = weatherResults.filter(r => r && !r.success).length;
+
+        const successful = weatherResults.filter((r) => r && r.success).length;
+        if (successful > 0 || attempt === maxAttempts - 1) {
+            break;
+        }
+        debugLog(`⚠ No successful station fetches (attempt ${attempt + 1}/${maxAttempts}), retrying…`, true);
+        await new Promise((r) => setTimeout(r, retryDelay));
+    }
+
+    return { canonicalCoralGables, weatherResults };
+}
+
+/**
+ * IndexedDB snapshot + prune + reload historical list (after grid has updated).
+ */
+async function persistWeatherSnapshotAndReloadHistory(weatherResults) {
+    if (!weatherResults || !Array.isArray(weatherResults) || weatherResults.length === 0) {
+        return;
+    }
+    try {
+        await DB.storeWeatherSnapshot(weatherResults);
+        try {
+            await DB.cleanOldData();
+        } catch {
+            /* non-fatal */
+        }
+        state.historicalSnapshots = await TimeFeatures.getHistoricalSnapshots();
+        updateSnapshotCount();
+    } catch (dbError) {
+        console.warn('DB storage failed:', dbError);
+    }
+}
+
+/**
+ * Refresh weather data from APIs
+ * @param {{ preloaded?: { canonicalCoralGables: object|null, weatherResults: object[] }, refreshOverlayStarted?: boolean }} [options]
+ */
+async function refreshWeatherData(options = {}) {
+    try {
+        debugLog('Fetching weather for ' + state.samplingPoints.length + ' points...');
+
+        if (!options.refreshOverlayStarted) {
+            startGlobalRefreshScanWhileLoading();
+        }
+
+        state.coralGablesLiveWeather = null;
+
+        let canonicalCoralGables = null;
+        let weatherResults = [];
+
+        if (options.preloaded) {
+            canonicalCoralGables = options.preloaded.canonicalCoralGables;
+            weatherResults = options.preloaded.weatherResults || [];
+            if (canonicalCoralGables) {
+                state.coralGablesLiveWeather = canonicalCoralGables;
+            }
+        } else {
+            const frame = await fetchWeatherFrameCore((current, total) => {
+                updateProgress(current, total);
+            });
+            canonicalCoralGables = frame.canonicalCoralGables;
+            weatherResults = frame.weatherResults;
+            if (canonicalCoralGables) {
+                state.coralGablesLiveWeather = canonicalCoralGables;
+            }
+        }
+
+        if (!weatherResults || !Array.isArray(weatherResults)) {
+            weatherResults = [];
+        }
+
+        const successful = weatherResults.filter((r) => r && r.success).length;
+        const failed = weatherResults.filter((r) => r && !r.success).length;
         debugLog(`Weather fetch complete: ${successful} success, ${failed} failed`);
-        
+
         // If all failed, use sample data for demonstration
         if (successful === 0) {
             debugLog('⚠ All APIs failed, using sample data for demonstration');
             state.coralGablesLiveWeather = null;
-            weatherResults = state.samplingPoints.map((point, index) => ({
+            weatherResults = state.samplingPoints.map((point) => ({
                 pointId: point.id,
                 success: true,
                 temperature: 70 + Math.random() * 20, // Random temp 70-90°F
@@ -1329,14 +1426,14 @@ async function refreshWeatherData() {
                 source: 'sample-data'
             }));
         }
-        
+
         // Recount after potential sample data
-        const finalSuccessful = weatherResults.filter(r => r && r.success).length;
+        const finalSuccessful = weatherResults.filter((r) => r && r.success).length;
         const finalFailed = state.samplingPoints.length - finalSuccessful;
-        
+
         // Attach weather data to sampling points
-        state.samplingPoints = state.samplingPoints.map(point => {
-            const weatherData = weatherResults.find(w => w && w.pointId === point.id);
+        state.samplingPoints = state.samplingPoints.map((point) => {
+            const weatherData = weatherResults.find((w) => w && w.pointId === point.id);
             return { ...point, weatherData };
         });
 
@@ -1346,7 +1443,7 @@ async function refreshWeatherData() {
                 state.coralGablesLiveWeather = centerPt.weatherData;
             }
         }
-        
+
         // Interpolate data across grid (only if we have successful data)
         if (finalSuccessful > 0) {
             const valueKeys = ['temperature', 'humidity', 'windSpeed', 'pressure'];
@@ -1355,29 +1452,36 @@ async function refreshWeatherData() {
         } else {
             debugLog('⚠ No data to interpolate, using defaults');
         }
-        
-        // Store snapshot
-        try {
-            if (weatherResults && Array.isArray(weatherResults) && weatherResults.length > 0) {
-                await DB.storeWeatherSnapshot(weatherResults);
-                // Reload historical snapshots
-                state.historicalSnapshots = await TimeFeatures.getHistoricalSnapshots();
-                updateSnapshotCount();
-            }
-        } catch (dbError) {
-            console.warn('DB storage failed:', dbError);
-        }
-        
+
+        await yieldToBrowserForPaint();
+
         // Update visualization with REAL data (loading scans stop in `finally`)
         if (state.currentMode === 'split-screen') {
             await updateSplitVisualization({ membranePulse: true });
+        } else if (state.currentMode === 'historical') {
+            const prevIdx = state.playbackController?.getCurrentIndex?.();
+            if (state.historicalSnapshots.length === 0) {
+                updateVisualization(state.samplingPoints, state.gridCells, null, { membranePulse: true });
+            } else {
+                rebindHistoricalPlaybackController(prevIdx);
+            }
+        } else if (state.currentMode === 'forecast-3h' || state.currentMode === 'forecast-24h') {
+            const hours = state.currentMode === 'forecast-3h' ? 3 : 24;
+            if (!state.forecastData || state.forecastData.length === 0) {
+                await fetchForecastData();
+            }
+            if (state.forecastData && state.forecastData.length > 0) {
+                showForecast(hours);
+            } else {
+                updateVisualization(state.samplingPoints, state.gridCells, null, { membranePulse: true });
+            }
         } else {
             updateVisualization(state.samplingPoints, state.gridCells, null, { membranePulse: true });
         }
 
         syncSceneAtmosphereFromApiWeather();
         debugLog(`✓ Scene sky · live sun · Esri weather=${state.sceneWeatherMode} (from API)`);
-        
+
         // Update UI
         const activeApiSources = collectActiveApiSourcesForFrame(weatherResults, canonicalCoralGables);
         updateDataSourceDisplay({
@@ -1389,8 +1493,8 @@ async function refreshWeatherData() {
         });
         updateLastUpdateTime();
         updateCoralGablesLiveDisplay();
-        
-        // Fetch forecasts if not already loaded
+
+        // Fetch forecasts if not already loaded (non-blocking for interaction)
         try {
             if (!state.forecastData || state.forecastData.length === 0) {
                 fetchForecastData();
@@ -1398,20 +1502,24 @@ async function refreshWeatherData() {
         } catch (forecastErr) {
             debugLog('⚠ Forecast fetch skipped: ' + forecastErr.message);
         }
-        
-        // Check alerts
-        try {
-            await checkWeatherAlerts();
-        } catch (err) {
-            debugLog('Alert check failed: ' + err.message);
-        }
 
-        try {
-            maybeScheduleMicroclimateToast();
-        } catch (mcErr) {
-            console.warn('Microclimate toast schedule:', mcErr);
-        }
-        
+        await persistWeatherSnapshotAndReloadHistory(weatherResults);
+
+        scheduleIdleCallback(() => {
+            void (async () => {
+                try {
+                    await checkWeatherAlerts();
+                } catch (err) {
+                    debugLog('Alert check failed: ' + err.message);
+                }
+                try {
+                    maybeScheduleMicroclimateToast();
+                } catch (mcErr) {
+                    console.warn('Microclimate toast schedule:', mcErr);
+                }
+            })();
+        });
+
         debugLog('✓ Refresh complete');
     } catch (error) {
         console.error('Failed to refresh weather data:', error);
@@ -1591,7 +1699,7 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
         debugLog('⚠ Invalid gridCells in updateVisualization');
         gridCells = [];
     }
-    
+
     require([
         'esri/Graphic',
         'esri/geometry/Point',
@@ -1600,17 +1708,16 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
         'esri/symbols/SimpleFillSymbol',
         'esri/PopupTemplate'
     ], (Graphic, Point, Polygon, SimpleMarkerSymbol, SimpleFillSymbol, PopupTemplate) => {
-        
         try {
             const layers = layersOverride || state.layers;
             if (!layers || !layers.grid || !layers.points) {
                 debugLog('⚠ Layers not ready');
                 return;
             }
-            
+
             layers.grid.removeAll();
             layers.points.removeAll();
-            
+
             let pointsAdded = 0;
             let cellsAdded = 0;
 
@@ -1633,22 +1740,17 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
                     : null;
 
             /** All grid looks use the same legend scale (`TEMP_COLOR_GRADIENT` via relief normalization). */
-            const tempToRgb = (temp, minT, maxT, range) =>
-                classicReliefTempRgb(temp, minT, maxT, range);
-        
+            const tempToRgb = (temp, minT, maxT, range) => classicReliefTempRgb(temp, minT, maxT, range);
+
             // Add sampling points
             if (samplingPoints && samplingPoints.length > 0) {
-                samplingPoints.forEach(point => {
+                samplingPoints.forEach((point) => {
                     if (!point || !point.weatherData || point.weatherData.error) return;
-                    
+
                     try {
                         const t = point.weatherData.temperature;
                         let rgb = [255, 255, 255];
-                        const hostCell = findGridCellUnderPoint(
-                            point.longitude,
-                            point.latitude,
-                            gridCells
-                        );
+                        const hostCell = findGridCellUnderPoint(point.longitude, point.latitude, gridCells);
                         let tForPalette = t;
                         if (
                             hostCell &&
@@ -1666,54 +1768,56 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
                                 reliefForPalette.range
                             );
                         }
-                        const zBeacon = basic ? 50 : tide
-                            ? (CONFIG.TIDEfield_BEACON_Z_METERS ?? 52)
-                            : (CONFIG.GULF_GLASS_BEACON_Z_METERS ?? 48);
+                        const zBeacon = basic
+                            ? 50
+                            : tide
+                              ? (CONFIG.TIDEfield_BEACON_Z_METERS ?? 52)
+                              : (CONFIG.GULF_GLASS_BEACON_Z_METERS ?? 48);
                         const basicOutlineA = CONFIG.BASIC_GRID_OUTLINE_ALPHA ?? 118;
-                        const pointFillAlpha = basic
-                            ? 250
-                            : CONFIG.GULF_GLASS_BEACON_FILL_ALPHA ?? 232;
+                        const pointFillAlpha = basic ? 250 : (CONFIG.GULF_GLASS_BEACON_FILL_ALPHA ?? 232);
                         const graphic = new Graphic({
-                geometry: new Point({
-                    longitude: point.longitude,
-                    latitude: point.latitude,
-                    z: zBeacon
-                }),
-                symbol: new SimpleMarkerSymbol({
-                    color: basic ? [...rgb, 250] : [...rgb, pointFillAlpha],
-                    size: basic
-                        ? 12
-                        : tide
-                          ? CONFIG.TIDEfield_BEACON_SIZE ?? CONFIG.GULF_GLASS_BEACON_SIZE ?? 12
-                          : CONFIG.GULF_GLASS_BEACON_SIZE ?? 12,
-                    outline: {
-                        color: basic
-                            ? [...rgb, basicOutlineA]
-                            : CONFIG.GULF_GLASS_BEACON_OUTLINE || [52, 198, 118, 232],
-                        width: basic ? 2 : 2
-                    }
-                }),
-                attributes: {
-                    pointId: point.id,
-                    locationLabel: getCoralGablesAreaLabel(point.id),
-                    locationCoords: `${Number(point.latitude).toFixed(5)}° N, ${Math.abs(Number(point.longitude)).toFixed(5)}° W`,
-                    temperature: (point.weatherData.temperature || 0).toFixed(1),
-                    feelsLike: (point.weatherData.feelsLike || 0).toFixed(1),
-                    humidity: (point.weatherData.humidity || 0).toFixed(0),
-                    pressure: (point.weatherData.pressure || 0).toFixed(0),
-                    windSpeed: (point.weatherData.windSpeed || 0).toFixed(1),
-                    windDirection: (point.weatherData.windDirection || 0).toFixed(0),
-                    windGust: point.weatherData.windGust ? point.weatherData.windGust.toFixed(1) : '--',
-                    precipitation: (point.weatherData.precipitation || 0).toFixed(2),
-                    cloudCover: (point.weatherData.cloudCover || 0).toFixed(0),
-                    visibility: (point.weatherData.visibility || 0).toFixed(0),
-                    weather: point.weatherData.weather || '--',
-                    weatherDescription: point.weatherData.weatherDescription || '--',
-                    source: point.weatherData.source || 'Unknown'
-                },
-                popupTemplate: new PopupTemplate({
-                    title: `Weather: ${point.id}`,
-                    content: `
+                            geometry: new Point({
+                                longitude: point.longitude,
+                                latitude: point.latitude,
+                                z: zBeacon
+                            }),
+                            symbol: new SimpleMarkerSymbol({
+                                color: basic ? [...rgb, 250] : [...rgb, pointFillAlpha],
+                                size: basic
+                                    ? 12
+                                    : tide
+                                      ? (CONFIG.TIDEfield_BEACON_SIZE ?? CONFIG.GULF_GLASS_BEACON_SIZE ?? 12)
+                                      : (CONFIG.GULF_GLASS_BEACON_SIZE ?? 12),
+                                outline: {
+                                    color: basic
+                                        ? [...rgb, basicOutlineA]
+                                        : CONFIG.GULF_GLASS_BEACON_OUTLINE || [52, 198, 118, 232],
+                                    width: basic ? 2 : 2
+                                }
+                            }),
+                            attributes: {
+                                pointId: point.id,
+                                locationLabel: getCoralGablesAreaLabel(point.id),
+                                locationCoords: `${Number(point.latitude).toFixed(5)}° N, ${Math.abs(Number(point.longitude)).toFixed(5)}° W`,
+                                temperature: (point.weatherData.temperature || 0).toFixed(1),
+                                feelsLike: (point.weatherData.feelsLike || 0).toFixed(1),
+                                humidity: (point.weatherData.humidity || 0).toFixed(0),
+                                pressure: (point.weatherData.pressure || 0).toFixed(0),
+                                windSpeed: (point.weatherData.windSpeed || 0).toFixed(1),
+                                windDirection: (point.weatherData.windDirection || 0).toFixed(0),
+                                windGust: point.weatherData.windGust
+                                    ? point.weatherData.windGust.toFixed(1)
+                                    : '--',
+                                precipitation: (point.weatherData.precipitation || 0).toFixed(2),
+                                cloudCover: (point.weatherData.cloudCover || 0).toFixed(0),
+                                visibility: (point.weatherData.visibility || 0).toFixed(0),
+                                weather: point.weatherData.weather || '--',
+                                weatherDescription: point.weatherData.weatherDescription || '--',
+                                source: point.weatherData.source || 'Unknown'
+                            },
+                            popupTemplate: new PopupTemplate({
+                                title: `Weather: ${point.id}`,
+                                content: `
                         <div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(148,163,184,0.35);font-size:12px;line-height:1.45">
                         <b>Location:</b> {locationLabel}<br>
                         <b>Coordinates:</b> {locationCoords}
@@ -1731,9 +1835,9 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
                         <b>Condition:</b> {weather} ({weatherDescription})<br>
                         <b>Source:</b> {source}
                     `
-                })
-            });
-                        
+                            })
+                        });
+
                         layers.points.add(graphic);
                         pointsAdded++;
                     } catch (pointErr) {
@@ -1741,108 +1845,120 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
                     }
                 });
             }
-            
+
             // Add grid cells with interpolated data (min/max-normalized relief + per-corner Z for crumpling)
             if (gridCells && gridCells.length > 0) {
                 const relief = reliefForPalette || buildGridReliefGeometry(gridCells, samplingPoints, 2);
-                const flatZ =
-                    CONFIG.GRID_BASE_ELEVATION_METERS + CONFIG.GRID_TEMP_RELIEF_METERS * 0.5;
+                const flatZ = CONFIG.GRID_BASE_ELEVATION_METERS + CONFIG.GRID_TEMP_RELIEF_METERS * 0.5;
 
                 gridCells.forEach((cell, index) => {
                     if (!cell || !cell.bounds) return;
-                    
+
                     try {
-            let temp = 75; // Default
-                    let meanCornerZ = flatZ;
-                    let color = [46, 188, 108];
-                    let hasData = false;
-                    
-                    if (cell.interpolatedData && cell.interpolatedData.temperature != null) {
-                        temp = cell.interpolatedData.temperature;
-                hasData = true;
-            }
+                        let temp = 75; // Default
+                        let meanCornerZ = flatZ;
+                        let color = [46, 188, 108];
+                        let hasData = false;
 
-                    if (hasData) {
-                        if (relief) {
-                            color = tempToRgb(temp, relief.minT, relief.maxT, relief.range);
-                        } else {
-                            color = tempToRgb(temp, temp - 15, temp + 15, 30);
+                        if (cell.interpolatedData && cell.interpolatedData.temperature != null) {
+                            temp = cell.interpolatedData.temperature;
+                            hasData = true;
                         }
-                    }
 
-            let ring;
-            if (hasData && relief) {
-                const spec = relief.cornerSpecs[index];
-                const cornerZs = spec.cornerTemps.map((t) =>
-                    tempToReliefElevation(t, relief.minT, relief.maxT, relief.range)
-                );
-                meanCornerZ =
-                    cornerZs.reduce((a, b) => a + b, 0) / Math.max(cornerZs.length, 1);
-                ring = [
-                    [cell.bounds.west, cell.bounds.south, cornerZs[0]],
-                    [cell.bounds.east, cell.bounds.south, cornerZs[1]],
-                    [cell.bounds.east, cell.bounds.north, cornerZs[2]],
-                    [cell.bounds.west, cell.bounds.north, cornerZs[3]],
-                    [cell.bounds.west, cell.bounds.south, cornerZs[0]]
-                ];
-            } else {
-                const z = flatZ;
-                ring = [
-                    [cell.bounds.west, cell.bounds.south, z],
-                    [cell.bounds.east, cell.bounds.south, z],
-                    [cell.bounds.east, cell.bounds.north, z],
-                    [cell.bounds.west, cell.bounds.north, z],
-                    [cell.bounds.west, cell.bounds.south, z]
-                ];
-            }
-            
-            const polygon = new Polygon({
-                rings: [ring],
-                spatialReference: { wkid: 4326 }
-            });
-
-                    const outlineRgb =
-                        hasData && (gulfGlass || tide) ? gulfGlassOutlineRgb(color) : color;
-                    const outlineW = tide
-                        ? CONFIG.TIDEfield_GRID_OUTLINE_WIDTH ?? CONFIG.GULF_GLASS_GRID_OUTLINE_WIDTH ?? 1.35
-                        : basic
-                          ? 2
-                          : gulfGlass
-                            ? CONFIG.GULF_GLASS_GRID_OUTLINE_WIDTH ?? 1.35
-                            : 2;
-            
-                    const graphic = new Graphic({
-                        geometry: polygon,
-                        symbol: new SimpleFillSymbol({
-                            color: hasData ? [...color, fillAlpha] : [128, 128, 128, 0],
-                            outline: {
-                                color: hasData ? [...outlineRgb, outlineAlpha] : [40, 85, 62, 210],
-                                width: outlineW
+                        if (hasData) {
+                            if (relief) {
+                                color = tempToRgb(temp, relief.minT, relief.maxT, relief.range);
+                            } else {
+                                color = tempToRgb(temp, temp - 15, temp + 15, 30);
                             }
-                        }),
-                attributes: {
-                    cellId: cell.id,
-                    gridRow: cell.row,
-                    gridCol: cell.col,
-                    temperature: temp.toFixed(1),
-                    humidity: cell.interpolatedData?.humidity?.toFixed(1) || '--',
-                    windSpeed: cell.interpolatedData?.windSpeed?.toFixed(1) || '--',
-                    pressure: cell.interpolatedData?.pressure?.toFixed(1) || '--',
-                    elevation: meanCornerZ.toFixed(0),
-                    hasData: hasData
-                },
-                popupTemplate: new PopupTemplate({
-                    title: 'Grid Cell',
-                    content: hasData ? 
-                        `<b>Temperature:</b> {temperature}°F<br>
+                        }
+
+                        let ring;
+                        if (hasData && relief) {
+                            const spec = relief.cornerSpecs[index];
+                            if (!spec?.cornerTemps || spec.cornerTemps.length < 4) {
+                                const z = flatZ;
+                                ring = [
+                                    [cell.bounds.west, cell.bounds.south, z],
+                                    [cell.bounds.east, cell.bounds.south, z],
+                                    [cell.bounds.east, cell.bounds.north, z],
+                                    [cell.bounds.west, cell.bounds.north, z],
+                                    [cell.bounds.west, cell.bounds.south, z]
+                                ];
+                            } else {
+                                const cornerZs = spec.cornerTemps.map((t) =>
+                                    tempToReliefElevation(t, relief.minT, relief.maxT, relief.range)
+                                );
+                                meanCornerZ =
+                                    cornerZs.reduce((a, b) => a + b, 0) / Math.max(cornerZs.length, 1);
+                                ring = [
+                                    [cell.bounds.west, cell.bounds.south, cornerZs[0]],
+                                    [cell.bounds.east, cell.bounds.south, cornerZs[1]],
+                                    [cell.bounds.east, cell.bounds.north, cornerZs[2]],
+                                    [cell.bounds.west, cell.bounds.north, cornerZs[3]],
+                                    [cell.bounds.west, cell.bounds.south, cornerZs[0]]
+                                ];
+                            }
+                        } else {
+                            const z = flatZ;
+                            ring = [
+                                [cell.bounds.west, cell.bounds.south, z],
+                                [cell.bounds.east, cell.bounds.south, z],
+                                [cell.bounds.east, cell.bounds.north, z],
+                                [cell.bounds.west, cell.bounds.north, z],
+                                [cell.bounds.west, cell.bounds.south, z]
+                            ];
+                        }
+
+                        const polygon = new Polygon({
+                            rings: [ring],
+                            spatialReference: { wkid: 4326 }
+                        });
+
+                        const outlineRgb =
+                            hasData && (gulfGlass || tide) ? gulfGlassOutlineRgb(color) : color;
+                        const outlineW = tide
+                            ? (CONFIG.TIDEfield_GRID_OUTLINE_WIDTH ??
+                              CONFIG.GULF_GLASS_GRID_OUTLINE_WIDTH ??
+                              1.35)
+                            : basic
+                              ? 2
+                              : gulfGlass
+                                ? (CONFIG.GULF_GLASS_GRID_OUTLINE_WIDTH ?? 1.35)
+                                : 2;
+
+                        const graphic = new Graphic({
+                            geometry: polygon,
+                            symbol: new SimpleFillSymbol({
+                                color: hasData ? [...color, fillAlpha] : [128, 128, 128, 0],
+                                outline: {
+                                    color: hasData ? [...outlineRgb, outlineAlpha] : [40, 85, 62, 210],
+                                    width: outlineW
+                                }
+                            }),
+                            attributes: {
+                                cellId: cell.id,
+                                gridRow: cell.row,
+                                gridCol: cell.col,
+                                temperature: temp.toFixed(1),
+                                humidity: cell.interpolatedData?.humidity?.toFixed(1) || '--',
+                                windSpeed: cell.interpolatedData?.windSpeed?.toFixed(1) || '--',
+                                pressure: cell.interpolatedData?.pressure?.toFixed(1) || '--',
+                                elevation: meanCornerZ.toFixed(0),
+                                hasData: hasData
+                            },
+                            popupTemplate: new PopupTemplate({
+                                title: 'Grid Cell',
+                                content: hasData
+                                    ? `<b>Temperature:</b> {temperature}°F<br>
                          <b>Humidity:</b> {humidity}%<br>
                          <b>Wind Speed:</b> {windSpeed} mph<br>
                          <b>Pressure:</b> {pressure} mb<br>
-                         <b>Elevation:</b> {elevation} m` 
-                        : '<i>No data</i>'
-                })
-            });
-                    
+                         <b>Elevation:</b> {elevation} m`
+                                    : '<i>No data</i>'
+                            })
+                        });
+
                         layers.grid.add(graphic);
                         cellsAdded++;
                     } catch (cellErr) {
@@ -1850,9 +1966,9 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
                     }
                 });
             }
-            
+
             debugLog(`✓ Visualization: ${pointsAdded} points, ${cellsAdded} cells`);
-            
+
             // Render wind vectors
             renderWindVectors({ samplingPoints, layersOverride, state, debugLog });
 
@@ -1866,13 +1982,10 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
             }
 
             const isSplitRightPane =
-                layersOverride &&
-                state.layers.splitGrid &&
-                layersOverride.grid === state.layers.splitGrid;
+                layersOverride && state.layers.splitGrid && layersOverride.grid === state.layers.splitGrid;
             if (!isSplitRightPane) {
                 syncTempLegendGradient(getLegendTempBounds(samplingPoints, gridCells));
             }
-            
         } catch (vizError) {
             console.error('Visualization error:', vizError);
             debugLog('✗ Visualization failed: ' + vizError.message, true);
@@ -1891,8 +2004,7 @@ function syncTempLegendGradient(bounds) {
     }
     const minEl = document.getElementById('minTemp');
     const maxEl = document.getElementById('maxTemp');
-    const fmt = (v) =>
-        typeof v === 'number' && Number.isFinite(v) ? `${v.toFixed(1)}°F` : '--°F';
+    const fmt = (v) => (typeof v === 'number' && Number.isFinite(v) ? `${v.toFixed(1)}°F` : '--°F');
     const lo = bounds?.minT;
     const hi = bounds?.maxT;
     if (minEl) {
@@ -2085,19 +2197,20 @@ function setupEventListeners() {
             debugLog(`Grid Look: ${getMapVisualStyle()}`);
         });
     }
-    
-    // Refresh button
+
+    // Refresh button — sweep starts synchronously, then fetch (no rAF delay).
     document.getElementById('refreshBtn').addEventListener('click', () => {
-        refreshWeatherData();
+        startGlobalRefreshScanWhileLoading();
+        void refreshWeatherData({ refreshOverlayStarted: true });
     });
-    
+
     // Layer toggles
     document.getElementById('toggleGrid').addEventListener('change', (e) => {
         const v = e.target.checked;
         if (state.layers.grid) state.layers.grid.visible = v;
         if (state.layers.splitGrid) state.layers.splitGrid.visible = v;
     });
-    
+
     document.getElementById('togglePoints').addEventListener('change', (e) => {
         const v = e.target.checked;
         if (state.layers.points) state.layers.points.visible = v;
@@ -2127,7 +2240,7 @@ function setupEventListeners() {
             }
         });
     }
-    
+
     // Playback controls
     document.getElementById('playBtn').addEventListener('click', startPlayback);
     document.getElementById('pauseBtn').addEventListener('click', pausePlayback);
@@ -2137,7 +2250,7 @@ function setupEventListeners() {
     document.getElementById('timelineSlider').addEventListener('input', (e) => {
         seekPlayback(parseInt(e.target.value));
     });
-    
+
     // Split-screen controls
     const swapBtn = document.getElementById('swapViews');
     if (swapBtn) {
@@ -2156,10 +2269,27 @@ function setupEventListeners() {
     if (rightViewModeEl) {
         rightViewModeEl.addEventListener('change', onSplitModeSelectChange);
     }
-    
+
     syncTempLegendGradient(getLegendTempBounds(state.samplingPoints, state.gridCells));
-    
+
     debugLog('Event listeners registered');
+}
+
+/**
+ * Stop historical timeline playback (interval) and reset Play/Pause controls when leaving that mode.
+ */
+function stopHistoricalPlaybackIfRunning() {
+    if (state.playbackController) {
+        state.playbackController.pause();
+    }
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    if (playBtn) {
+        playBtn.classList.remove('hidden');
+    }
+    if (pauseBtn) {
+        pauseBtn.classList.add('hidden');
+    }
 }
 
 /**
@@ -2170,8 +2300,12 @@ function handleModeChange(mode) {
         teardownSplitScreen();
     }
 
+    if (mode !== 'historical') {
+        stopHistoricalPlaybackIfRunning();
+    }
+
     state.currentMode = mode;
-    
+
     document.getElementById('playbackControls').classList.add('hidden');
     document.getElementById('splitScreenControls').classList.toggle('hidden', mode !== 'split-screen');
     document.getElementById('viewDiv').classList.remove('hidden');
@@ -2181,7 +2315,7 @@ function handleModeChange(mode) {
 
     if (mode === 'historical') {
         document.getElementById('playbackControls').classList.remove('hidden');
-        initializePlayback();
+        void initializePlayback();
     } else if (mode === 'split-screen') {
         initializeSplitScreen();
     } else if (mode === 'forecast-3h') {
@@ -2192,23 +2326,32 @@ function handleModeChange(mode) {
         // Current mode
         updateVisualization(state.samplingPoints, state.gridCells);
     }
-    
+
     debugLog(`Mode changed to: ${mode}`);
 }
 
 /**
- * Initialize playback mode
+ * Rebuild {@link state.playbackController} after `state.historicalSnapshots` changes (e.g. new refresh stored).
+ * @param {number} [preserveIndex] — keep this frame; if omitted, jump to newest snapshot.
  */
-function initializePlayback() {
+function rebindHistoricalPlaybackController(preserveIndex) {
     if (state.historicalSnapshots.length === 0) {
-        showError('No historical data available yet. Data collection starts now.');
+        if (state.playbackController) {
+            state.playbackController.destroy();
+            state.playbackController = null;
+        }
         return;
     }
-    
+    const maxIdx = state.historicalSnapshots.length - 1;
+    const idx =
+        typeof preserveIndex === 'number' && Number.isFinite(preserveIndex)
+            ? Math.max(0, Math.min(Math.floor(preserveIndex), maxIdx))
+            : maxIdx;
+
     if (state.playbackController) {
         state.playbackController.destroy();
     }
-    
+
     state.playbackController = new TimeFeatures.PlaybackController(
         state.historicalSnapshots,
         (snapshot, index, total) => {
@@ -2216,10 +2359,27 @@ function initializePlayback() {
             applySnapshotToVisualization(snapshot);
         }
     );
-    
-    // Start at most recent
-    state.playbackController.seek(state.historicalSnapshots.length - 1);
-    
+    state.playbackController.seek(idx);
+}
+
+/**
+ * Initialize playback mode — reloads snapshots from IndexedDB (48h window) so the timeline matches stored history.
+ */
+async function initializePlayback() {
+    try {
+        state.historicalSnapshots = await TimeFeatures.getHistoricalSnapshots();
+        updateSnapshotCount();
+    } catch (e) {
+        console.warn('[playback] failed to load historical snapshots:', e);
+    }
+
+    if (state.historicalSnapshots.length === 0) {
+        showError('No historical data available yet. Data collection starts now.');
+        return;
+    }
+
+    rebindHistoricalPlaybackController();
+
     debugLog('Playback initialized');
 }
 
@@ -2232,22 +2392,22 @@ function showForecast(hoursAhead) {
         fetchForecastData();
         return;
     }
-    
+
     const forecastPoints = TimeFeatures.getForecastData(state.forecastData, hoursAhead);
-    
+
     // Update sampling points with forecast data
-    const forecastSamplingPoints = state.samplingPoints.map(point => {
-        const forecastData = forecastPoints.find(f => f.pointId === point.id);
+    const forecastSamplingPoints = state.samplingPoints.map((point) => {
+        const forecastData = forecastPoints.find((f) => f.pointId === point.id);
         return { ...point, weatherData: forecastData };
     });
-    
+
     // Interpolate
     const valueKeys = ['temperature', 'humidity', 'windSpeed', 'pressure'];
     const forecastGridCells = interpolateGrid(state.gridCells, forecastSamplingPoints, valueKeys);
-    
+
     // Update visualization
     updateVisualization(forecastSamplingPoints, forecastGridCells);
-    
+
     debugLog(`Showing ${hoursAhead}h forecast`);
 }
 
@@ -2273,11 +2433,7 @@ function getSamplingPointsAndGridForSplitMode(mode) {
             const forecastData = forecastPoints.find((f) => f.pointId === point.id);
             return { ...point, weatherData: forecastData };
         });
-        const forecastGridCells = interpolateGrid(
-            state.gridCells,
-            forecastSamplingPoints,
-            valueKeys
-        );
+        const forecastGridCells = interpolateGrid(state.gridCells, forecastSamplingPoints, valueKeys);
         return { samplingPoints: forecastSamplingPoints, gridCells: forecastGridCells };
     }
     if (mode === 'historical') {
@@ -2693,13 +2849,9 @@ function splitSceneCamerasMatch(leaderView, followerView) {
         Math.abs(pa.latitude - pb.latitude) < elat;
     const sameZ =
         (pa.z == null && pb.z == null) ||
-        (typeof pa.z === 'number' &&
-            typeof pb.z === 'number' &&
-            Math.abs(pa.z - pb.z) < ez);
-    const sameTilt =
-        Math.abs((a.tilt ?? 0) - (b.tilt ?? 0)) < eang;
-    const sameHead =
-        Math.abs((a.heading ?? 0) - (b.heading ?? 0)) < eang;
+        (typeof pa.z === 'number' && typeof pb.z === 'number' && Math.abs(pa.z - pb.z) < ez);
+    const sameTilt = Math.abs((a.tilt ?? 0) - (b.tilt ?? 0)) < eang;
+    const sameHead = Math.abs((a.heading ?? 0) - (b.heading ?? 0)) < eang;
     return sameLon && sameLat && sameZ && sameTilt && sameHead;
 }
 
@@ -2816,221 +2968,219 @@ function initializeSplitScreen() {
     const { WebScene, SceneView, GraphicsLayer, Zoom, Compass, NavigationToggle, Home } = E;
 
     void (async () => {
-            try {
-                if (!splitStillValid()) {
-                    return;
+        try {
+            if (!splitStillValid()) {
+                return;
+            }
+            if (!state.splitMap) {
+                const portalItem = { id: CONFIG.ARCGIS_WEBSCENE_ID };
+                if (CONFIG.ARCGIS_PORTAL_URL) {
+                    portalItem.portal = { url: CONFIG.ARCGIS_PORTAL_URL };
                 }
-                if (!state.splitMap) {
-                    const portalItem = { id: CONFIG.ARCGIS_WEBSCENE_ID };
-                    if (CONFIG.ARCGIS_PORTAL_URL) {
-                        portalItem.portal = { url: CONFIG.ARCGIS_PORTAL_URL };
-                    }
-                    state.splitMap = new WebScene({ portalItem });
-                    state.layers.splitGrid = new GraphicsLayer({
-                        title: 'Weather Grid (compare)',
-                        elevationInfo: { mode: 'absolute-height' }
-                    });
-                    state.layers.splitPoints = new GraphicsLayer({
-                        title: 'Weather Points (compare)',
-                        elevationInfo: { mode: 'absolute-height' },
-                        visible: state.layers.points ? state.layers.points.visible : false
-                    });
-                    state.layers.splitWind = new GraphicsLayer({
-                        title: 'Wind (compare)',
-                        elevationInfo: { mode: 'absolute-height' },
-                        visible: state.layers.wind ? state.layers.wind.visible : false
-                    });
-                    state.layers.splitMembrane = new GraphicsLayer({
-                        title: 'Tidefield Membrane (compare)',
-                        elevationInfo: { mode: 'absolute-height' },
-                        listMode: 'hide'
-                    });
-                    state.layers.splitTether = new GraphicsLayer({
-                        title: 'Tidefield Tethers (compare)',
-                        elevationInfo: { mode: 'absolute-height' },
-                        listMode: 'hide'
-                    });
-                    const splitTide = isTidefieldMembraneActive();
-                    state.layers.splitMembrane.visible = splitTide;
-                    state.layers.splitTether.visible = splitTide;
-                    state.splitMap.addMany([
-                        state.layers.splitGrid,
-                        state.layers.splitMembrane,
-                        state.layers.splitTether,
-                        state.layers.splitPoints,
-                        state.layers.splitWind
-                    ]);
-                } else if (state.layers.splitWind && state.layers.wind) {
-                    state.layers.splitWind.visible = state.layers.wind.visible;
-                    if (state.layers.splitMembrane && state.layers.splitTether) {
-                        const v = isTidefieldMembraneActive();
-                        state.layers.splitMembrane.visible = v;
-                        state.layers.splitTether.visible = v;
-                    }
-                }
-
-                const leftEl = document.getElementById('leftView');
-                if (!leftEl) {
-                    throw new Error('leftView missing');
-                }
-                if (!leftEl.contains(document.getElementById('viewDiv'))) {
-                    reparentMainViewIntoSplitLeft();
-                }
-
-                const rightContainer = document.getElementById('rightView');
-                if (!rightContainer) {
-                    throw new Error('rightView container missing');
-                }
-
-                if (!state.rightSceneView) {
-                    state.rightSceneView = new SceneView({
-                        container: rightContainer,
-                        map: state.splitMap,
-                        viewingMode: 'global',
-                        qualityProfile: getSceneQualityProfile(),
-                        camera: state.sceneView.camera.clone(),
-                        popup: {
-                            dockEnabled: false,
-                            dockOptions: {
-                                buttonEnabled: false
-                            },
-                            alignment: 'auto',
-                            collapseEnabled: false
-                        }
-                    });
-
-                    await state.splitMap.when();
-                    if (!splitStillValid() || !state.rightSceneView) {
-                        return;
-                    }
-                    if (typeof state.splitMap.loadAll === 'function') {
-                        try {
-                            await state.splitMap.loadAll();
-                        } catch (e) {
-                            console.warn('splitMap.loadAll:', e);
-                        }
-                    }
-                    if (!splitStillValid() || !state.rightSceneView) {
-                        return;
-                    }
-                    await state.rightSceneView.when();
-                    if (!splitStillValid() || !state.rightSceneView) {
-                        return;
-                    }
-
-                    if (CONFIG.SCENE_FORCE_GLOBAL_FOR_WEATHER) {
-                        try {
-                            if (state.splitMap.initialViewProperties) {
-                                state.splitMap.initialViewProperties.viewingMode = 'global';
-                            }
-                        } catch (e) {
-                            /* ignore */
-                        }
-                    }
-
-                    ensureSceneViewQuality(state.rightSceneView);
-                    const qWatch = state.rightSceneView.watch('qualityProfile', (q) => {
-                        const target = getSceneQualityProfile();
-                        if (q !== target) {
-                            ensureSceneViewQuality(state.rightSceneView);
-                        }
-                    });
-                    state.splitRightInternalWatchHandles.push(qWatch);
-
-                    const uiSlots = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
-                    for (const slot of uiSlots) {
-                        try {
-                            if (typeof state.rightSceneView.ui.empty === 'function') {
-                                state.rightSceneView.ui.empty(slot);
-                            }
-                        } catch (e) {
-                            /* ignore */
-                        }
-                    }
-
-                    const splitZoom = new Zoom({ view: state.rightSceneView });
-                    const splitCompass = new Compass({ view: state.rightSceneView });
-                    const splitNav = new NavigationToggle({ view: state.rightSceneView });
-                    const splitHome = new Home({ view: state.rightSceneView });
-                    state.rightSceneView.ui.add(splitZoom, 'top-right');
-                    state.rightSceneView.ui.add(splitCompass, 'top-right');
-                    state.rightSceneView.ui.add(splitNav, 'top-right');
-                    state.rightSceneView.ui.add(splitHome, 'top-right');
-                }
-
-                if (!splitStillValid() || !state.rightSceneView || !state.sceneView) {
-                    return;
-                }
-
-                try {
-                    if (typeof state.sceneView.resize === 'function') {
-                        state.sceneView.resize();
-                    }
-                    if (state.rightSceneView && typeof state.rightSceneView.resize === 'function') {
-                        state.rightSceneView.resize();
-                    }
-                } catch (resizeErr) {
-                    console.warn('Split view resize:', resizeErr);
-                }
-
-                state.splitSuppressCameraSync = true;
-                state.splitCameraSyncing = true;
-                try {
-                    await state.rightSceneView.goTo(state.sceneView.viewpoint.clone(), {
-                        duration: 0
-                    });
-                } finally {
-                    state.splitCameraSyncing = false;
-                    state.splitSuppressCameraSync = false;
-                }
-
-                if (!splitStillValid() || !state.rightSceneView || !state.sceneView) {
-                    return;
-                }
-
-                wireSplitCameraBidirectional();
-
-                applySceneEnvironment(state.rightSceneView);
-
-                if (
-                    isTidefieldMembraneActive() &&
-                    state.layers.splitGrid &&
-                    state.layers.splitMembrane &&
-                    state.layers.splitTether &&
-                    state.rightSceneView
-                ) {
-                    registerTidefieldContext('split', {
-                        gridLayer: state.layers.splitGrid,
-                        membraneLayer: state.layers.splitMembrane,
-                        tetherLayer: state.layers.splitTether,
-                        views: [state.rightSceneView]
-                    });
-                }
-
-                await updateSplitVisualization();
-                if (!splitStillValid()) {
-                    return;
-                }
-                updateSplitViewLabels();
-
-                wireSplitLinkedSelection();
-
-                debugLog('✓ Split-screen views ready');
-            } catch (e) {
-                console.error(e);
-                showError(
-                    'Split-screen failed: ' + (e && e.message ? e.message : String(e))
-                );
-                teardownSplitScreen();
-                document.getElementById('splitViewContainer').classList.add('hidden');
-                document.getElementById('splitScreenControls').classList.add('hidden');
-                state.currentMode = 'current';
-                const sel = document.getElementById('modeSelector');
-                if (sel) {
-                    sel.value = 'current';
+                state.splitMap = new WebScene({ portalItem });
+                state.layers.splitGrid = new GraphicsLayer({
+                    title: 'Weather Grid (compare)',
+                    elevationInfo: { mode: 'absolute-height' }
+                });
+                state.layers.splitPoints = new GraphicsLayer({
+                    title: 'Weather Points (compare)',
+                    elevationInfo: { mode: 'absolute-height' },
+                    visible: state.layers.points ? state.layers.points.visible : false
+                });
+                state.layers.splitWind = new GraphicsLayer({
+                    title: 'Wind (compare)',
+                    elevationInfo: { mode: 'absolute-height' },
+                    visible: state.layers.wind ? state.layers.wind.visible : false
+                });
+                state.layers.splitMembrane = new GraphicsLayer({
+                    title: 'Tidefield Membrane (compare)',
+                    elevationInfo: { mode: 'absolute-height' },
+                    listMode: 'hide'
+                });
+                state.layers.splitTether = new GraphicsLayer({
+                    title: 'Tidefield Tethers (compare)',
+                    elevationInfo: { mode: 'absolute-height' },
+                    listMode: 'hide'
+                });
+                const splitTide = isTidefieldMembraneActive();
+                state.layers.splitMembrane.visible = splitTide;
+                state.layers.splitTether.visible = splitTide;
+                state.splitMap.addMany([
+                    state.layers.splitGrid,
+                    state.layers.splitMembrane,
+                    state.layers.splitTether,
+                    state.layers.splitPoints,
+                    state.layers.splitWind
+                ]);
+            } else if (state.layers.splitWind && state.layers.wind) {
+                state.layers.splitWind.visible = state.layers.wind.visible;
+                if (state.layers.splitMembrane && state.layers.splitTether) {
+                    const v = isTidefieldMembraneActive();
+                    state.layers.splitMembrane.visible = v;
+                    state.layers.splitTether.visible = v;
                 }
             }
-        })();
+
+            const leftEl = document.getElementById('leftView');
+            if (!leftEl) {
+                throw new Error('leftView missing');
+            }
+            if (!leftEl.contains(document.getElementById('viewDiv'))) {
+                reparentMainViewIntoSplitLeft();
+            }
+
+            const rightContainer = document.getElementById('rightView');
+            if (!rightContainer) {
+                throw new Error('rightView container missing');
+            }
+
+            if (!state.rightSceneView) {
+                state.rightSceneView = new SceneView({
+                    container: rightContainer,
+                    map: state.splitMap,
+                    viewingMode: 'global',
+                    qualityProfile: getSceneQualityProfile(),
+                    camera: state.sceneView.camera.clone(),
+                    popup: {
+                        dockEnabled: false,
+                        dockOptions: {
+                            buttonEnabled: false
+                        },
+                        alignment: 'auto',
+                        collapseEnabled: false
+                    }
+                });
+
+                await state.splitMap.when();
+                if (!splitStillValid() || !state.rightSceneView) {
+                    return;
+                }
+                if (typeof state.splitMap.loadAll === 'function') {
+                    try {
+                        await state.splitMap.loadAll();
+                    } catch (e) {
+                        console.warn('splitMap.loadAll:', e);
+                    }
+                }
+                if (!splitStillValid() || !state.rightSceneView) {
+                    return;
+                }
+                await state.rightSceneView.when();
+                if (!splitStillValid() || !state.rightSceneView) {
+                    return;
+                }
+
+                if (CONFIG.SCENE_FORCE_GLOBAL_FOR_WEATHER) {
+                    try {
+                        if (state.splitMap.initialViewProperties) {
+                            state.splitMap.initialViewProperties.viewingMode = 'global';
+                        }
+                    } catch (e) {
+                        /* ignore */
+                    }
+                }
+
+                ensureSceneViewQuality(state.rightSceneView);
+                const qWatch = state.rightSceneView.watch('qualityProfile', (q) => {
+                    const target = getSceneQualityProfile();
+                    if (q !== target) {
+                        ensureSceneViewQuality(state.rightSceneView);
+                    }
+                });
+                state.splitRightInternalWatchHandles.push(qWatch);
+
+                const uiSlots = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+                for (const slot of uiSlots) {
+                    try {
+                        if (typeof state.rightSceneView.ui.empty === 'function') {
+                            state.rightSceneView.ui.empty(slot);
+                        }
+                    } catch (e) {
+                        /* ignore */
+                    }
+                }
+
+                const splitZoom = new Zoom({ view: state.rightSceneView });
+                const splitCompass = new Compass({ view: state.rightSceneView });
+                const splitNav = new NavigationToggle({ view: state.rightSceneView });
+                const splitHome = new Home({ view: state.rightSceneView });
+                state.rightSceneView.ui.add(splitZoom, 'top-right');
+                state.rightSceneView.ui.add(splitCompass, 'top-right');
+                state.rightSceneView.ui.add(splitNav, 'top-right');
+                state.rightSceneView.ui.add(splitHome, 'top-right');
+            }
+
+            if (!splitStillValid() || !state.rightSceneView || !state.sceneView) {
+                return;
+            }
+
+            try {
+                if (typeof state.sceneView.resize === 'function') {
+                    state.sceneView.resize();
+                }
+                if (state.rightSceneView && typeof state.rightSceneView.resize === 'function') {
+                    state.rightSceneView.resize();
+                }
+            } catch (resizeErr) {
+                console.warn('Split view resize:', resizeErr);
+            }
+
+            state.splitSuppressCameraSync = true;
+            state.splitCameraSyncing = true;
+            try {
+                await state.rightSceneView.goTo(state.sceneView.viewpoint.clone(), {
+                    duration: 0
+                });
+            } finally {
+                state.splitCameraSyncing = false;
+                state.splitSuppressCameraSync = false;
+            }
+
+            if (!splitStillValid() || !state.rightSceneView || !state.sceneView) {
+                return;
+            }
+
+            wireSplitCameraBidirectional();
+
+            applySceneEnvironment(state.rightSceneView);
+
+            if (
+                isTidefieldMembraneActive() &&
+                state.layers.splitGrid &&
+                state.layers.splitMembrane &&
+                state.layers.splitTether &&
+                state.rightSceneView
+            ) {
+                registerTidefieldContext('split', {
+                    gridLayer: state.layers.splitGrid,
+                    membraneLayer: state.layers.splitMembrane,
+                    tetherLayer: state.layers.splitTether,
+                    views: [state.rightSceneView]
+                });
+            }
+
+            await updateSplitVisualization();
+            if (!splitStillValid()) {
+                return;
+            }
+            updateSplitViewLabels();
+
+            wireSplitLinkedSelection();
+
+            debugLog('✓ Split-screen views ready');
+        } catch (e) {
+            console.error(e);
+            showError('Split-screen failed: ' + (e && e.message ? e.message : String(e)));
+            teardownSplitScreen();
+            document.getElementById('splitViewContainer').classList.add('hidden');
+            document.getElementById('splitScreenControls').classList.add('hidden');
+            state.currentMode = 'current';
+            const sel = document.getElementById('modeSelector');
+            if (sel) {
+                sel.value = 'current';
+            }
+        }
+    })();
 }
 
 /**
@@ -3038,7 +3188,7 @@ function initializeSplitScreen() {
  */
 function startPlayback() {
     if (!state.playbackController) return;
-    
+
     state.playbackController.play();
     document.getElementById('playBtn').classList.add('hidden');
     document.getElementById('pauseBtn').classList.remove('hidden');
@@ -3046,7 +3196,7 @@ function startPlayback() {
 
 function pausePlayback() {
     if (!state.playbackController) return;
-    
+
     state.playbackController.pause();
     document.getElementById('playBtn').classList.remove('hidden');
     document.getElementById('pauseBtn').classList.add('hidden');
@@ -3060,8 +3210,11 @@ function changePlaybackSpeed(speed) {
 
 function seekPlayback(value) {
     if (!state.playbackController) return;
-    
-    const index = Math.floor((value / 100) * (state.historicalSnapshots.length - 1));
+
+    const n = state.historicalSnapshots.length;
+    if (n === 0) return;
+    const maxIdx = n - 1;
+    const index = maxIdx === 0 ? 0 : Math.round((value / 100) * maxIdx);
     state.playbackController.seek(index);
 }
 
@@ -3069,22 +3222,38 @@ function seekPlayback(value) {
  * Update playback UI
  */
 function updatePlaybackUI(snapshot, index, total) {
-    document.getElementById('currentTimestamp').textContent = TimeFeatures.formatTimestamp(snapshot.timestamp);
-    document.getElementById('timelineSlider').value = (index / (total - 1)) * 100;
+    if (!snapshot || total < 1) return;
+    const tsEl = document.getElementById('currentTimestamp');
+    const sliderEl = document.getElementById('timelineSlider');
+    if (tsEl) {
+        tsEl.textContent = TimeFeatures.formatTimestamp(snapshot.timestamp);
+    }
+    if (sliderEl) {
+        // Single snapshot: no range to scrub — pin at 100% (avoid 0/0 NaN that broke the slider).
+        if (total === 1) {
+            sliderEl.value = '100';
+        } else {
+            sliderEl.value = String((index / (total - 1)) * 100);
+        }
+    }
 }
 
 /**
  * Apply snapshot to visualization
  */
 function applySnapshotToVisualization(snapshot) {
-    const snapshotPoints = state.samplingPoints.map(point => {
-        const data = snapshot.data.find(d => d.pointId === point.id);
+    if (!snapshot?.data || !Array.isArray(snapshot.data)) {
+        debugLog('⚠ Snapshot missing data array', true);
+        return;
+    }
+    const snapshotPoints = state.samplingPoints.map((point) => {
+        const data = snapshot.data.find((d) => d.pointId === point.id);
         return { ...point, weatherData: data };
     });
-    
+
     const valueKeys = ['temperature', 'humidity', 'windSpeed', 'pressure'];
     const snapshotGridCells = interpolateGrid(state.gridCells, snapshotPoints, valueKeys);
-    
+
     updateVisualization(snapshotPoints, snapshotGridCells);
 }
 
@@ -3103,15 +3272,15 @@ function scheduleNextWeatherRefreshFromNow() {
  */
 function startAutoRefresh() {
     scheduleNextWeatherRefreshFromNow();
-    
+
     state.timers.weatherRefresh = setInterval(() => {
         refreshWeatherData();
     }, CONFIG.WEATHER_REFRESH_INTERVAL);
-    
+
     state.timers.alertRefresh = setInterval(() => {
         checkWeatherAlerts();
     }, CONFIG.ALERT_REFRESH_INTERVAL);
-    
+
     // Countdown timer
     state.timers.countdownTimer = setInterval(() => {
         updateCountdown();
@@ -3123,11 +3292,11 @@ function startAutoRefresh() {
  */
 function updateCountdown() {
     if (!state.nextRefreshTime) return;
-    
+
     const remaining = state.nextRefreshTime - Date.now();
     const minutes = Math.floor(remaining / 60000);
     const seconds = Math.floor((remaining % 60000) / 1000);
-    
+
     const nextUpdateEl = document.getElementById('nextUpdateTime');
     if (nextUpdateEl) {
         nextUpdateEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
@@ -3156,7 +3325,10 @@ async function checkWeatherAlerts() {
         showLiveWeatherSupplementToasts(list);
     } catch (error) {
         state.lastNwsAlertsFetchOk = false;
-        debugLog('⚠ NWS alerts check failed: ' + (error && error.message ? error.message : String(error)), true);
+        debugLog(
+            '⚠ NWS alerts check failed: ' + (error && error.message ? error.message : String(error)),
+            true
+        );
     }
 }
 
@@ -3402,9 +3574,7 @@ function buildWelcomeWeatherBody() {
     }
 
     const stats =
-        t != null
-            ? ` Around ${Math.round(t)}°F${w != null ? `, wind ~${Math.round(w)} mph` : ''}.`
-            : '';
+        t != null ? ` Around ${Math.round(t)}°F${w != null ? `, wind ~${Math.round(w)} mph` : ''}.` : '';
 
     return `${greeting}${stats} ${tip}`;
 }
@@ -3618,7 +3788,8 @@ function attemptMicroclimateToast() {
     }
 
     const minSpread = Math.max(4, Number(CONFIG.MICROCLIMATE_MIN_SPREAD_F) || 10);
-    const chance = Math.min(1, Math.max(0, Number(CONFIG.MICROCLIMATE_TOAST_CHANCE) ?? 0.38));
+    const rawChance = Number(CONFIG.MICROCLIMATE_TOAST_CHANCE);
+    const chance = Math.min(1, Math.max(0, Number.isFinite(rawChance) ? rawChance : 0.38));
     const minGap = Math.max(60 * 1000, Number(CONFIG.MICROCLIMATE_TOAST_MIN_INTERVAL_MS) || 8 * 60 * 1000);
 
     if (Math.random() > chance) {
@@ -3713,13 +3884,19 @@ function classifyNwsAlertVisualClass(alert) {
     if (/tornado|hurricane|typhoon|extreme wind|extreme cold/.test(s)) {
         return 'alert-toast--nws-severe';
     }
-    if (/severe thunderstorm|thunderstorm warning|thunderstorm watch|lightning|hail|squall|waterspout/.test(s)) {
+    if (
+        /severe thunderstorm|thunderstorm warning|thunderstorm watch|lightning|hail|squall|waterspout/.test(s)
+    ) {
         return 'alert-toast--nws-storm';
     }
     if (/flash flood|river flood|coastal flood|flood warning|flood advisory|areal flood|hydrologic/.test(s)) {
         return 'alert-toast--nws-flood';
     }
-    if (/blizzard|winter storm|ice storm|freeze|frost|snow|sleet|freezing rain|winter weather|wind chill/.test(s)) {
+    if (
+        /blizzard|winter storm|ice storm|freeze|frost|snow|sleet|freezing rain|winter weather|wind chill/.test(
+            s
+        )
+    ) {
         return 'alert-toast--nws-winter';
     }
     if (/excessive heat|heat advisory|heat warning|heat watch|red flag|fire weather/.test(s)) {
@@ -3731,7 +3908,11 @@ function classifyNwsAlertVisualClass(alert) {
     if (/rain|shower|drizzle|precipitation|flood watch|hydrologic outlook/.test(s)) {
         return 'alert-toast--nws-rain';
     }
-    if (/high wind|wind advisory|wind warning|gale|tropical storm|coastal hazard|rip current|surf|marine|beach|small craft/.test(s)) {
+    if (
+        /high wind|wind advisory|wind warning|gale|tropical storm|coastal hazard|rip current|surf|marine|beach|small craft/.test(
+            s
+        )
+    ) {
         return 'alert-toast--nws-wind';
     }
     const sev = alert.severity || '';
@@ -3748,7 +3929,10 @@ function classifyNwsAlertVisualClass(alert) {
 }
 
 function nwsAlertsCoverHazard(nwsAlerts, hazard) {
-    const t = (nwsAlerts || []).map((a) => `${a.event || ''} ${a.headline || ''}`).join(' ').toLowerCase();
+    const t = (nwsAlerts || [])
+        .map((a) => `${a.event || ''} ${a.headline || ''}`)
+        .join(' ')
+        .toLowerCase();
     if (hazard === 'storm') {
         return /thunder|tornado|severe|hurricane|tropical|wind advisory|wind warning|gale|waterspout|lightning|hail|marine|surf|rip|coastal|storm|squall/.test(
             t
@@ -3829,7 +4013,10 @@ function showLiveWeatherSupplementToasts(nwsAlerts) {
             'Live: pea-soup vibes. Low beams on, speed down, drama optional.',
             'Live snapshot: fog on the sensors. Treat intersections like plot twists—slow and attentive.'
         ]);
-    } else if (!nwsAlertsCoverHazard(nwsAlerts, 'rain') && (mode === 'rainy' || /rain|shower|drizzle/.test(desc))) {
+    } else if (
+        !nwsAlertsCoverHazard(nwsAlerts, 'rain') &&
+        (mode === 'rainy' || /rain|shower|drizzle/.test(desc))
+    ) {
         variant = 'alert-toast--live-supplement alert-toast--live-rain';
         message = pickRandomString([
             'Live conditions: rain or drizzle in the merged station feed—grab cover; puddles are social hubs.',
@@ -3937,7 +4124,7 @@ function showWeatherAlertToasts(alerts) {
 function showLoading(show, message = 'Loading...') {
     const loader = document.getElementById('loadingIndicator');
     const messageEl = document.getElementById('loadingMessage');
-    
+
     if (show) {
         if (messageEl) messageEl.textContent = message;
         loader.classList.remove('hidden');
@@ -4047,7 +4234,7 @@ function showError(message) {
 function swapSplitViews() {
     const left = document.getElementById('leftViewMode').value;
     const right = document.getElementById('rightViewMode').value;
-    
+
     document.getElementById('leftViewMode').value = right;
     document.getElementById('rightViewMode').value = left;
     if (state.currentMode === 'split-screen') {

@@ -11,7 +11,7 @@ import * as DB from '../storage/db.js';
 export async function getHistoricalSnapshots() {
     const endTime = Date.now();
     const startTime = endTime - CONFIG.HISTORICAL_DATA_RETENTION;
-    
+
     try {
         const snapshots = await DB.getWeatherHistory(startTime, endTime);
         return snapshots.sort((a, b) => a.timestamp - b.timestamp);
@@ -28,19 +28,27 @@ export function getSnapshotAtTime(snapshots, targetTimestamp) {
     if (!snapshots || snapshots.length === 0) {
         return null;
     }
-    
-    // Find closest snapshot
-    let closest = snapshots[0];
-    let minDiff = Math.abs(closest.timestamp - targetTimestamp);
-    
+
+    const target = Number(targetTimestamp);
+    if (!Number.isFinite(target)) {
+        return null;
+    }
+
+    let closest = null;
+    let minDiff = Infinity;
+
     for (const snapshot of snapshots) {
-        const diff = Math.abs(snapshot.timestamp - targetTimestamp);
+        const ts = Number(snapshot?.timestamp);
+        if (!Number.isFinite(ts)) {
+            continue;
+        }
+        const diff = Math.abs(ts - target);
         if (diff < minDiff) {
             minDiff = diff;
             closest = snapshot;
         }
     }
-    
+
     return closest;
 }
 
@@ -51,15 +59,18 @@ export function interpolateSnapshots(snapshot1, snapshot2, t) {
     if (!snapshot1 || !snapshot2) {
         return snapshot1 || snapshot2;
     }
-    
+    if (!Array.isArray(snapshot1.data) || !Array.isArray(snapshot2.data)) {
+        return snapshot1 || snapshot2;
+    }
+
     // t is between 0 and 1
     const interpolatedData = snapshot1.data.map((point1, index) => {
         const point2 = snapshot2.data[index];
-        
+
         if (!point1 || !point2 || point1.error || point2.error) {
             return point1 || point2;
         }
-        
+
         return {
             ...point1,
             temperature: point1.temperature + t * (point2.temperature - point1.temperature),
@@ -68,7 +79,7 @@ export function interpolateSnapshots(snapshot1, snapshot2, t) {
             pressure: point1.pressure + t * (point2.pressure - point1.pressure)
         };
     });
-    
+
     return {
         timestamp: snapshot1.timestamp + t * (snapshot2.timestamp - snapshot1.timestamp),
         data: interpolatedData
@@ -80,37 +91,37 @@ export function interpolateSnapshots(snapshot1, snapshot2, t) {
  */
 export class PlaybackController {
     constructor(snapshots, onUpdate) {
-        this.snapshots = snapshots;
+        this.snapshots = snapshots && snapshots.length ? snapshots : [];
         this.onUpdate = onUpdate;
-        this.currentIndex = snapshots.length - 1;
+        this.currentIndex = this.snapshots.length > 0 ? this.snapshots.length - 1 : 0;
         this.isPlaying = false;
         this.speed = 2; // 2x speed default
         this.interval = null;
     }
-    
+
     play() {
         if (this.isPlaying || !this.snapshots || this.snapshots.length === 0) {
             return;
         }
-        
+
         this.isPlaying = true;
         const baseInterval = 1000; // 1 second per snapshot at 1x
         const interval = baseInterval / this.speed;
-        
+
         this.interval = setInterval(() => {
             this.currentIndex++;
-            
+
             if (this.currentIndex >= this.snapshots.length) {
                 this.currentIndex = 0; // Loop back to beginning
             }
-            
+
             const snapshot = this.snapshots[this.currentIndex];
-if (this.onUpdate) {
+            if (this.onUpdate && snapshot) {
                 this.onUpdate(snapshot, this.currentIndex, this.snapshots.length);
             }
         }, interval);
     }
-    
+
     pause() {
         this.isPlaying = false;
         if (this.interval) {
@@ -118,7 +129,7 @@ if (this.onUpdate) {
             this.interval = null;
         }
     }
-    
+
     setSpeed(speed) {
         const wasPlaying = this.isPlaying;
         this.pause();
@@ -127,15 +138,18 @@ if (this.onUpdate) {
             this.play();
         }
     }
-    
+
     seek(index) {
+        if (!this.snapshots || this.snapshots.length === 0) {
+            return;
+        }
         this.currentIndex = Math.max(0, Math.min(index, this.snapshots.length - 1));
         const snapshot = this.snapshots[this.currentIndex];
-        if (this.onUpdate) {
+        if (this.onUpdate && snapshot) {
             this.onUpdate(snapshot, this.currentIndex, this.snapshots.length);
         }
     }
-    
+
     seekToTime(timestamp) {
         const snapshot = getSnapshotAtTime(this.snapshots, timestamp);
         if (snapshot) {
@@ -143,11 +157,16 @@ if (this.onUpdate) {
             this.seek(index);
         }
     }
-    
+
     getCurrentSnapshot() {
         return this.snapshots[this.currentIndex];
     }
-    
+
+    /** Index of the frame currently shown (for preserving position after snapshot reload). */
+    getCurrentIndex() {
+        return this.currentIndex;
+    }
+
     destroy() {
         this.pause();
     }
@@ -157,7 +176,14 @@ if (this.onUpdate) {
  * Format timestamp for display
  */
 export function formatTimestamp(timestamp) {
-    const date = new Date(timestamp);
+    const ms = Number(timestamp);
+    if (!Number.isFinite(ms)) {
+        return '—';
+    }
+    const date = new Date(ms);
+    if (Number.isNaN(date.getTime())) {
+        return '—';
+    }
     return date.toLocaleString('en-US', {
         month: 'short',
         day: 'numeric',
@@ -170,13 +196,17 @@ export function formatTimestamp(timestamp) {
  * Get time ago string
  */
 export function getTimeAgo(timestamp) {
+    const ts = Number(timestamp);
+    if (!Number.isFinite(ts)) {
+        return '';
+    }
     const now = Date.now();
-    const diff = now - timestamp;
-    
+    const diff = now - ts;
+
     const minutes = Math.floor(diff / 60000);
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
-    
+
     if (minutes < 60) {
         return `${minutes} min ago`;
     } else if (hours < 24) {
@@ -193,26 +223,45 @@ export function getForecastData(forecastResults, hoursAhead) {
     if (!forecastResults || forecastResults.length === 0) {
         return null;
     }
-    
-    const targetTime = Date.now() + (hoursAhead * 60 * 60 * 1000);
-    
-    return forecastResults.map(pointForecast => {
-        if (!pointForecast.forecasts || pointForecast.error) {
+
+    const targetTime = Date.now() + hoursAhead * 60 * 60 * 1000;
+
+    return forecastResults.map((pointForecast) => {
+        if (!pointForecast || pointForecast.error) {
             return pointForecast;
         }
-        
-        // Find closest forecast
-        let closest = pointForecast.forecasts[0];
-        let minDiff = Math.abs(closest.timestamp - targetTime);
-        
-        for (const forecast of pointForecast.forecasts) {
-            const diff = Math.abs(forecast.timestamp - targetTime);
-            if (diff < minDiff) {
+        const periods = pointForecast.forecasts;
+        if (!Array.isArray(periods) || periods.length === 0) {
+            return {
+                pointId: pointForecast.pointId,
+                error: 'no_forecast_periods',
+                success: false
+            };
+        }
+
+        let closest = null;
+        let minDiff = Infinity;
+
+        for (const forecast of periods) {
+            const ts = Number(forecast.timestamp);
+            if (!Number.isFinite(ts)) {
+                continue;
+            }
+            const diff = Math.abs(ts - targetTime);
+            if (closest == null || diff < minDiff) {
                 minDiff = diff;
                 closest = forecast;
             }
         }
-        
+
+        if (closest == null) {
+            return {
+                pointId: pointForecast.pointId,
+                error: 'no_valid_forecast_times',
+                success: false
+            };
+        }
+
         return {
             pointId: pointForecast.pointId,
             ...closest,

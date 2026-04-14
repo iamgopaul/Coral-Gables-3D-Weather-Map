@@ -55,30 +55,36 @@ export const MERGE_PRIORITY_NOAA_FIRST = {
  */
 function mergeWeatherData(sources, mergePriority = MERGE_PRIORITY_DEFAULT) {
     const merged = {};
-    
+
     // Collect all fields from all sources with priority scoring
     const fieldScores = {};
-    
-    sources.forEach(source => {
+
+    sources.forEach((source) => {
         if (!source) return;
-        
+
         const priority = mergePriority[source.source] ?? 999;
-        
-        Object.keys(source).forEach(key => {
+
+        Object.keys(source).forEach((key) => {
             const value = source[key];
-            
+
             // Skip invalid/default/placeholder values
-            if (value === null || value === undefined || value === 'Unknown' || value === 'smoke' || value === 'unknown') {
+            if (
+                value === null ||
+                value === undefined ||
+                value === 'Unknown' ||
+                value === 'smoke' ||
+                value === 'unknown'
+            ) {
                 return;
             }
-            
+
             // Special handling for weather description - avoid generic/placeholder values
             if (key === 'weatherDescription' && typeof value === 'string') {
                 if (value.toLowerCase().includes('smoke') || value.toLowerCase() === 'unknown') {
                     return;
                 }
             }
-            
+
             // If we haven't seen this field or this source has better priority
             if (!(key in fieldScores) || priority < fieldScores[key].priority) {
                 fieldScores[key] = {
@@ -89,12 +95,12 @@ function mergeWeatherData(sources, mergePriority = MERGE_PRIORITY_DEFAULT) {
             }
         });
     });
-    
+
     // Extract just the values and log sources
     Object.keys(fieldScores).forEach((key) => {
         merged[key] = fieldScores[key].value;
     });
-    
+
     return merged;
 }
 
@@ -132,19 +138,82 @@ export async function fetchCurrentWeather(latitude, longitude, options = {}) {
             console.warn(`✗ ${api} failed:`, result.reason?.message);
         }
     });
-    
+
     if (sources.length === 0) {
         throw new Error('All weather APIs failed');
     }
-    
+
     // Merge data from all successful sources
     const merged = mergeWeatherData(sources, mergePriority);
-    
+
     // Add source info
-    merged.sources = sources.map(s => s.source).join(', ');
-    merged.source = sources.map(s => s.source).join(', ');
-    
+    merged.sources = sources.map((s) => s.source).join(', ');
+    merged.source = sources.map((s) => s.source).join(', ');
+
     return merged;
+}
+
+/**
+ * Pick the forecast period with timestamp closest to `targetMs`.
+ * @param {{ timestamp?: number }[]} periods
+ * @param {number} targetMs
+ * @returns {{ timestamp?: number, pressure?: number|null }|null}
+ */
+function findClosestForecastPeriodByTime(periods, targetMs) {
+    if (!Array.isArray(periods) || periods.length === 0) {
+        return null;
+    }
+    const t = Number(targetMs);
+    if (!Number.isFinite(t)) {
+        return null;
+    }
+    let closest = null;
+    let minDiff = Infinity;
+    for (const f of periods) {
+        const ts = Number(f.timestamp);
+        if (!Number.isFinite(ts)) {
+            continue;
+        }
+        const d = Math.abs(ts - t);
+        if (d < minDiff) {
+            minDiff = d;
+            closest = f;
+        }
+    }
+    return closest;
+}
+
+/**
+ * NOAA hourly often wins on period count but omits pressure. Fill `pressure` (mb) from
+ * Open-Meteo / OpenWeatherMap by closest timestamp.
+ * @param {{ forecasts?: object[] }} best
+ * @param {object[]} sources
+ */
+function enrichForecastPressureFromSources(best, sources) {
+    if (!best?.forecasts?.length || !sources?.length) {
+        return;
+    }
+    const donors = ['Open-Meteo', 'OpenWeatherMap']
+        .map((name) => sources.find((s) => s && s.source === name))
+        .filter((s) => Array.isArray(s.forecasts) && s.forecasts.length > 0);
+
+    for (const period of best.forecasts) {
+        if (period.pressure != null && Number.isFinite(Number(period.pressure))) {
+            continue;
+        }
+        const t = Number(period.timestamp);
+        if (!Number.isFinite(t)) {
+            continue;
+        }
+        for (const donor of donors) {
+            const match = findClosestForecastPeriodByTime(donor.forecasts, t);
+            const p = match?.pressure;
+            if (p != null && Number.isFinite(Number(p))) {
+                period.pressure = Math.round(Number(p));
+                break;
+            }
+        }
+    }
 }
 
 /**
@@ -168,24 +237,25 @@ export async function fetchForecast(latitude, longitude) {
         .filter((r) => r.status === 'fulfilled')
         .map((r) => r.value)
         .filter(Boolean);
-    
+
     if (sources.length === 0) {
         throw new Error('All forecast APIs failed');
     }
-    
+
     // Combine forecasts from all successful sources
     // Prioritize more recent/detailed forecasts
     let best = sources[0];
-    
+
     // Prefer source with more forecast periods
     for (const source of sources) {
         if (source.forecasts && source.forecasts.length > (best.forecasts?.length || 0)) {
             best = source;
         }
     }
-    
-    best.sources = sources.map(s => s.source).join(', ');
-    
+
+    best.sources = sources.map((s) => s.source).join(', ');
+    enrichForecastPressureFromSources(best, sources);
+
     return best;
 }
 
@@ -207,58 +277,72 @@ export async function fetchBatchWeather(samplingPoints, onProgress = null, optio
     const mergePriority = options.mergePriority || MERGE_PRIORITY_DEFAULT;
     const centerWeather = options.centerWeather;
     const centerPointId = options.centerPointId || 'center';
-    const results = [];
-    const total = samplingPoints.length;
-    
-    for (let i = 0; i < samplingPoints.length; i++) {
+    const n = samplingPoints.length;
+    if (n === 0) {
+        return [];
+    }
+
+    const concurrency = Math.max(1, Math.min(Number(CONFIG.WEATHER_BATCH_CONCURRENCY) || 6, n));
+    const waveGap = Number(CONFIG.WEATHER_BATCH_WAVE_GAP_MS) || 0;
+    const results = new Array(n);
+    let completed = 0;
+
+    const bump = () => {
+        completed++;
+        if (onProgress) {
+            onProgress(completed, n);
+        }
+    };
+
+    async function fetchIndex(i) {
         const point = samplingPoints[i];
-        
         if (centerWeather && point.id === centerPointId) {
-            results.push({
+            results[i] = {
                 pointId: point.id,
                 latitude: point.latitude,
                 longitude: point.longitude,
                 ...centerWeather,
                 success: true
-            });
-            if (onProgress) {
-                onProgress(i + 1, total);
-            }
-            await new Promise((resolve) => setTimeout(resolve, 150));
-            continue;
+            };
+            bump();
+            return;
         }
-        
         try {
             const weatherData = await fetchCurrentWeather(point.latitude, point.longitude, {
                 mergePriority
             });
-            results.push({
+            results[i] = {
                 pointId: point.id,
                 latitude: point.latitude,
                 longitude: point.longitude,
                 ...weatherData,
                 success: true
-            });
+            };
         } catch (error) {
             console.error(`Failed to fetch weather for point ${point.id}:`, error);
-            results.push({
+            results[i] = {
                 pointId: point.id,
                 latitude: point.latitude,
                 longitude: point.longitude,
                 error: error.message,
                 success: false
-            });
+            };
         }
-        
-        // Call progress callback
-        if (onProgress) {
-            onProgress(i + 1, total);
-        }
-        
-        // Small delay between requests
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        bump();
     }
-    
+
+    for (let start = 0; start < n; start += concurrency) {
+        const end = Math.min(start + concurrency, n);
+        const wave = [];
+        for (let i = start; i < end; i++) {
+            wave.push(fetchIndex(i));
+        }
+        await Promise.all(wave);
+        if (waveGap > 0 && end < n) {
+            await new Promise((r) => setTimeout(r, waveGap));
+        }
+    }
+
     return results;
 }
 
@@ -266,39 +350,59 @@ export async function fetchBatchWeather(samplingPoints, onProgress = null, optio
  * Batch fetch forecast for all sampling points
  */
 export async function fetchBatchForecast(samplingPoints, onProgress = null) {
-    const results = [];
-    const total = samplingPoints.length;
-    
-    for (let i = 0; i < samplingPoints.length; i++) {
+    const n = samplingPoints.length;
+    if (n === 0) {
+        return [];
+    }
+
+    const concurrency = Math.max(1, Math.min(Number(CONFIG.WEATHER_BATCH_CONCURRENCY) || 6, n));
+    const waveGap = Number(CONFIG.WEATHER_BATCH_WAVE_GAP_MS) || 0;
+    const results = new Array(n);
+    let completed = 0;
+
+    const bump = () => {
+        completed++;
+        if (onProgress) {
+            onProgress(completed, n);
+        }
+    };
+
+    async function fetchIndex(i) {
         const point = samplingPoints[i];
-        
         try {
             const forecastData = await fetchForecast(point.latitude, point.longitude);
-            results.push({
+            results[i] = {
                 pointId: point.id,
                 latitude: point.latitude,
                 longitude: point.longitude,
                 ...forecastData,
                 success: true
-            });
+            };
         } catch (error) {
             console.error(`Failed to fetch forecast for point ${point.id}:`, error);
-            results.push({
+            results[i] = {
                 pointId: point.id,
                 latitude: point.latitude,
                 longitude: point.longitude,
                 error: error.message,
                 success: false
-            });
+            };
         }
-        
-        if (onProgress) {
-            onProgress(i + 1, total);
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, 150));
+        bump();
     }
-    
+
+    for (let start = 0; start < n; start += concurrency) {
+        const end = Math.min(start + concurrency, n);
+        const wave = [];
+        for (let i = start; i < end; i++) {
+            wave.push(fetchIndex(i));
+        }
+        await Promise.all(wave);
+        if (waveGap > 0 && end < n) {
+            await new Promise((r) => setTimeout(r, waveGap));
+        }
+    }
+
     return results;
 }
 

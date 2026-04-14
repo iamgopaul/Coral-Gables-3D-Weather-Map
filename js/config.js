@@ -57,7 +57,7 @@ export const CONFIG = {
      * High = best lighting, atmosphere, and anti-aliasing; re-applied if the WebScene resets it.
      */
     SCENE_QUALITY_PROFILE: 'high',
-    
+
     // Scene lighting — sun/sky follow real clock time (evening/night at the right hours)
     SCENE_LIVE_LIGHTING_ENABLED: true,
     /** How often to refresh simulated sun position (ms) */
@@ -127,37 +127,48 @@ export const CONFIG = {
 
     // Weather API — optional OpenWeatherMap (from `.env` via Vite); Open-Meteo + NOAA work without it
     OPENWEATHERMAP_API_KEY: OPENWEATHERMAP_API_KEY_FROM_ENV,
-    
+
     // Location Configuration
     CORAL_GABLES_CENTER: {
         latitude: 25.7217,
         longitude: -80.2683
     },
-    
+
     // Grid extent (approximate boundaries)
     GRID_EXTENT: {
-        north: 25.7600,
+        north: 25.76,
         south: 25.6834,
-        east: -80.2400,
+        east: -80.24,
         west: -80.2966
     },
-    
+
     // Grid Configuration
     GRID_ROWS: 7,
     GRID_COLS: 7,
     GRID_RESOLUTION: 'medium', // fine, medium, coarse
-    
+
     // Sampling Points Configuration
     TOTAL_SAMPLING_POINTS: 17,
-    
+
     // Refresh Intervals (in milliseconds)
     WEATHER_REFRESH_INTERVAL: 2 * 60 * 1000, // 2 minutes
+
+    /**
+     * Parallel batch weather: how many station fetches run at once (each station still merges Open-Meteo + NOAA in parallel).
+     * Higher = faster load; if you see 429/rate errors from an API, lower to 3–4 or set `WEATHER_BATCH_WAVE_GAP_MS` to 40–80.
+     */
+    WEATHER_BATCH_CONCURRENCY: 6,
+    /** Optional pause (ms) between concurrency *waves* only — 0 = fastest. */
+    WEATHER_BATCH_WAVE_GAP_MS: 0,
+    /** If the first full-grid fetch yields zero successes, wait and retry once (helps flaky networks / cold APIs). */
+    WEATHER_FETCH_RETRY_DELAY_MS: 1100,
+    WEATHER_FETCH_MAX_ATTEMPTS: 2,
     /** NWS active-alerts poll — keep relatively frequent so the list stays current. */
     ALERT_REFRESH_INTERVAL: 60 * 1000, // 1 minute
-    
+
     // Historical Data Configuration
     HISTORICAL_DATA_RETENTION: 48 * 60 * 60 * 1000, // 48 hours
-    
+
     // Temperature Visualization Configuration
     /** @deprecated for live grid — main view uses relief mapping below */
     TEMP_TO_ELEVATION_SCALE: 20, // meters per degree F (absolute scale; poor for small spreads)
@@ -243,11 +254,11 @@ export const CONFIG = {
 
     /** Basic grid + loading placeholder — outline only; keep edges soft so tiles show through. */
     BASIC_GRID_OUTLINE_ALPHA: 118,
-    
+
     // Animation Configuration
     DEFORMATION_ANIMATION_DURATION: 2000, // milliseconds
     PLAYBACK_SPEEDS: [1, 2, 4],
-    
+
     /**
      * When station temps across the grid differ by at least `MICROCLIMATE_MIN_SPREAD_F`, occasionally
      * toast which Coral Gables area is hotter/colder (sampling-point regions). Not used with sample-data.
@@ -285,13 +296,13 @@ export const CONFIG = {
     TEMP_GRADIENT_THRESHOLD: 15, // °F difference across grid
     TEMP_CHANGE_RATE_THRESHOLD: 5, // °F per hour
     HEAT_ISLAND_THRESHOLD: 10, // °F above average
-    
+
     // API Endpoints
     OPENWEATHERMAP_CURRENT: 'https://api.openweathermap.org/data/2.5/weather',
     OPENWEATHERMAP_FORECAST: 'https://api.openweathermap.org/data/2.5/forecast',
     NOAA_POINTS: 'https://api.weather.gov/points',
     NOAA_ALERTS: 'https://api.weather.gov/alerts/active',
-    
+
     // IndexedDB Configuration
     DB_NAME: 'CoralGablesWeatherGrid',
     DB_VERSION: 1,

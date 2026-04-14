@@ -1,242 +1,300 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <!-- Local dev: http-server defaults to Cache: 3600s; avoid stale ES module / JS during iteration -->
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <title>The Coral Gables Weather Radar</title>
-    <!-- First-paint: hide UI removed by config before styles/main.css loads (stops FOUC on cold load) -->
-    <style id="app-critical-shell">
-        .hidden { display: none !important; }
-        #lightingTestHud:not(.lighting-test-hud--visible) {
-            display: none !important;
-            visibility: hidden !important;
-        }
-        #esriWeatherWidgetHost:not(.esri-weather-widget-host--visible) {
-            position: absolute !important;
-            width: 0 !important;
-            height: 0 !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            overflow: hidden !important;
-            clip: rect(0, 0, 0, 0) !important;
-            border: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-        }
-    </style>
-    <link rel="icon" href="/favicon.png?v=20260414" type="image/png">
-    <link rel="preconnect" href="https://js.arcgis.com" crossorigin>
-    <link rel="dns-prefetch" href="https://js.arcgis.com">
-    
-    <!-- ArcGIS API for JavaScript 4.x -->
-    <link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/dark/main.css">
-    <link rel="stylesheet" href="/styles/main.css">
-    <!-- ArcGIS must load before the app module (Vite may hoist the module into head). -->
-    <script src="https://js.arcgis.com/4.29/"></script>
-    <script type="module" src="/js/main.js"></script>
-</head>
-<body>
-    <div id="app">
-        <!-- Main 3D View Container -->
-        <div id="viewDiv"></div>
-        
-        <!-- Split View Container (hidden by default) -->
-        <div id="splitViewContainer" class="hidden split-container">
-            <div id="leftView" class="split-view"></div>
-            <div id="rightView" class="split-view"></div>
-        </div>
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+        <!-- Local dev: http-server defaults to Cache: 3600s; avoid stale ES module / JS during iteration -->
+        <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+        <title>The Coral Gables Weather Radar</title>
+        <!-- First-paint: hide UI removed by config before styles/main.css loads (stops FOUC on cold load) -->
+        <style id="app-critical-shell">
+            .hidden {
+                display: none !important;
+            }
+            #lightingTestHud:not(.lighting-test-hud--visible) {
+                display: none !important;
+                visibility: hidden !important;
+            }
+            #esriWeatherWidgetHost:not(.esri-weather-widget-host--visible) {
+                position: absolute !important;
+                width: 0 !important;
+                height: 0 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                overflow: hidden !important;
+                clip: rect(0, 0, 0, 0) !important;
+                border: 0 !important;
+                visibility: hidden !important;
+                pointer-events: none !important;
+            }
+        </style>
+        <link rel="icon" href="/favicon.png?v=20260414" type="image/png" />
+        <link rel="preconnect" href="https://js.arcgis.com" crossorigin />
+        <link rel="dns-prefetch" href="https://js.arcgis.com" />
 
-        <!-- Slow looping CSS sweep while weather fetch runs (all grid looks, including Tidefield) -->
-        <div id="refreshScanOverlay" class="refresh-scan-overlay hidden" aria-hidden="true"></div>
+        <!-- ArcGIS API for JavaScript 4.x -->
+        <link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/dark/main.css" />
+        <link rel="stylesheet" href="/styles/main.css" />
+        <!-- ArcGIS must load before the app module (Vite may hoist the module into head). -->
+        <script src="https://js.arcgis.com/4.29/"></script>
+        <script type="module" src="/js/main.js"></script>
+    </head>
+    <body>
+        <div id="app">
+            <!-- Main 3D View Container -->
+            <div id="viewDiv"></div>
 
-        <!-- Page header (outside the menu rail) -->
-        <button id="appPageHeader" class="app-page-header" type="button" aria-label="Return to start view" title="Return to start view">
-            <div class="app-page-header__title">The Coral Gables Weather Radar</div>
-        </button>
-        
-        <!-- Weather Menu: left rail, legend + controls -->
-        <div id="mapTaskbar" class="map-taskbar panel panel--collapsible" aria-expanded="true">
-            <div class="map-taskbar__header panel-header" title="Click to minimize or expand the Weather Menu">
-                <div class="map-taskbar__header-brand">
-                    <h2 id="mapTaskbarTitle" class="map-taskbar__title">Weather Menu</h2>
-                    <div class="map-taskbar__clock" id="weatherMenuClock" aria-live="polite" aria-atomic="true">
-                        <span id="weatherMenuClockDate" class="map-taskbar__clock-date map-taskbar__clock-date--single"></span>
-                        <div id="weatherMenuClockDateStack" class="map-taskbar__clock-date-stack">
-                            <span id="weatherMenuClockDow" class="map-taskbar__clock-stack-line"></span>
-                            <span id="weatherMenuClockMd" class="map-taskbar__clock-stack-line"></span>
-                            <span id="weatherMenuClockYr" class="map-taskbar__clock-stack-line"></span>
+            <!-- Split View Container (hidden by default) -->
+            <div id="splitViewContainer" class="hidden split-container">
+                <div id="leftView" class="split-view"></div>
+                <div id="rightView" class="split-view"></div>
+            </div>
+
+            <!-- Slow looping CSS sweep while weather fetch runs (all grid looks, including Tidefield) -->
+            <div id="refreshScanOverlay" class="refresh-scan-overlay hidden" aria-hidden="true"></div>
+
+            <!-- Page header (outside the menu rail) -->
+            <button
+                id="appPageHeader"
+                class="app-page-header"
+                type="button"
+                aria-label="Return to start view"
+                title="Return to start view"
+            >
+                <div class="app-page-header__title">The Coral Gables Weather Radar</div>
+            </button>
+
+            <!-- Weather Menu: left rail, legend + controls -->
+            <div id="mapTaskbar" class="map-taskbar panel panel--collapsible" aria-expanded="true">
+                <div
+                    class="map-taskbar__header panel-header"
+                    title="Click to minimize or expand the Weather Menu"
+                >
+                    <div class="map-taskbar__header-brand">
+                        <h2 id="mapTaskbarTitle" class="map-taskbar__title">Weather Menu</h2>
+                        <div
+                            class="map-taskbar__clock"
+                            id="weatherMenuClock"
+                            aria-live="polite"
+                            aria-atomic="true"
+                        >
+                            <span
+                                id="weatherMenuClockDate"
+                                class="map-taskbar__clock-date map-taskbar__clock-date--single"
+                            ></span>
+                            <div id="weatherMenuClockDateStack" class="map-taskbar__clock-date-stack">
+                                <span id="weatherMenuClockDow" class="map-taskbar__clock-stack-line"></span>
+                                <span id="weatherMenuClockMd" class="map-taskbar__clock-stack-line"></span>
+                                <span id="weatherMenuClockYr" class="map-taskbar__clock-stack-line"></span>
+                            </div>
+                            <span id="weatherMenuClockTime" class="map-taskbar__clock-time"></span>
                         </div>
-                        <span id="weatherMenuClockTime" class="map-taskbar__clock-time"></span>
+                        <div id="cgLiveTempHeader" class="map-taskbar__header-temp">--°F</div>
                     </div>
-                    <div id="cgLiveTempHeader" class="map-taskbar__header-temp">--°F</div>
+                    <button
+                        type="button"
+                        class="panel-minimize-btn"
+                        id="mapTaskbarMinBtn"
+                        aria-expanded="true"
+                        aria-controls="mapTaskbarBody"
+                        title="Hide Weather Menu"
+                    >
+                        −
+                    </button>
                 </div>
-                <button type="button" class="panel-minimize-btn" id="mapTaskbarMinBtn" aria-expanded="true" aria-controls="mapTaskbarBody" title="Hide Weather Menu">−</button>
-            </div>
-            <div id="mapTaskbarBody" class="map-taskbar__body panel-body">
-            <div class="map-taskbar__col map-taskbar__col--legend">
-            <div id="coralGablesLive" class="coral-gables-live" aria-label="Current conditions at Coral Gables">
-                <h4>Coral Gables (live)</h4>
-                <div id="cgLiveTemp" class="cg-live-temp">--°F</div>
-                <p id="cgLiveWind" class="cg-live-wind">Wind: —</p>
-                <p id="cgLiveCondition" class="cg-live-condition">—</p>
-                <small id="cgLiveSource" class="cg-live-source"></small>
-            </div>
-            <h3 class="map-taskbar__legend-heading">Temperature Scale</h3>
-            <div id="tempGradient" class="gradient-bar"></div>
-            <div class="scale-labels">
-                <span id="minTemp">--°F</span>
-                <span id="maxTemp">--°F</span>
-            </div>
-            <div class="elevation-scale">
-                <p>Height = Temperature</p>
-                <small>Warmer areas rise higher</small>
-            </div>
-            <div class="mode-display">
-                <strong>Mode: <span id="currentModeText">Current</span></strong>
-            </div>
-            </div>
-            <div class="map-taskbar__col map-taskbar__col--controls">
-            <div class="control-group control-group--tip">
-                <small>💡 Click grid cells for details</small>
-            </div>
-            
-            <!-- Scene atmosphere: time-of-day + rain (Esri sun + weather) -->
-            <div id="lightingTestHud" class="control-group lighting-test-hud lighting-test-hud--panel" aria-label="Scene atmosphere" hidden>
-                <label for="sceneTimePresetSelect">Time of day</label>
-                <select id="sceneTimePresetSelect" class="lighting-test-hud-select">
-                    <option value="live">Live (real clock)</option>
-                    <option value="morning">Morning</option>
-                    <option value="midday">Midday</option>
-                    <option value="evening">Evening</option>
-                    <option value="night">Night</option>
-                </select>
-                <label for="sceneWeatherSelect">Weather</label>
-                <select id="sceneWeatherSelect" class="lighting-test-hud-select" title="Matches ArcGIS scene weather presets (SunnyWeather … FoggyWeather)">
-                    <option value="sunny">Sunny</option>
-                    <option value="cloudy">Cloudy</option>
-                    <option value="rainy">Rainy</option>
-                    <option value="snowy">Snowy</option>
-                    <option value="foggy">Foggy</option>
-                </select>
-                <div id="lightingHudSimTime" class="lighting-test-hud-time">—</div>
-                <div id="lightingHudOffset" class="lighting-test-hud-offset"></div>
-            </div>
-            
-            <!-- Grid Look preset (default: Gulf Glass) -->
-            <div class="control-group control-group--map-style">
-                <label for="mapVisualStyleSelect">Grid Look</label>
-                <select id="mapVisualStyleSelect" title="Gulf Glass = daily driver; Basic Grid = legend temp colors; Tidefield = ripples + membrane + tethers">
-                    <option value="gulf-glass">Gulf Glass</option>
-                    <option value="basic-grid">Basic Grid</option>
-                    <option value="tidefield-membrane">Tidefield Membrane</option>
-                </select>
-                <small class="control-hint">All grid looks use the same four-stop temperature scale (legend). Gulf / Basic / Tidefield differ in mesh style and Tidefield adds the membrane layer.</small>
-            </div>
-            
-            <!-- Mode Selector -->
-            <div class="control-group">
-                <label>View Mode:</label>
-                <select id="modeSelector">
-                    <option value="current">Current Conditions</option>
-                    <option value="forecast-3h">3-Hour Forecast</option>
-                    <option value="forecast-24h">24-Hour Forecast</option>
-                    <option value="historical">Historical Playback</option>
-                    <option value="split-screen">Split-Screen Compare</option>
-                </select>
-            </div>
-            
-            <!-- Historical Playback Controls -->
-            <div id="playbackControls" class="control-group hidden">
-                <label>Timeline (Last 48 Hours):</label>
-                <input type="range" id="timelineSlider" min="0" max="100" value="100">
-                <div class="playback-buttons">
-                    <button id="playBtn">▶ Play</button>
-                    <button id="pauseBtn" class="hidden">⏸ Pause</button>
-                    <select id="speedSelector">
-                        <option value="1">1x</option>
-                        <option value="2" selected>2x</option>
-                        <option value="4">4x</option>
-                    </select>
-                </div>
-                <div id="currentTimestamp"></div>
-                <div class="timeline-info">
-                    <small>Snapshots: <span id="snapshotCount">0</span></small>
-                </div>
-            </div>
-            
-            <!-- Split-Screen Controls -->
-            <div id="splitScreenControls" class="control-group hidden">
-                <label>Left View:</label>
-                <select id="leftViewMode">
-                    <option value="current">Current</option>
-                    <option value="forecast-3h">3-Hr Forecast</option>
-                    <option value="forecast-24h">24-Hr Forecast</option>
-                    <option value="historical">24 Hours Ago</option>
-                </select>
-                
-                <label>Right View:</label>
-                <select id="rightViewMode">
-                    <option value="forecast-3h" selected>3-Hr Forecast</option>
-                    <option value="current">Current</option>
-                    <option value="forecast-24h">24-Hr Forecast</option>
-                    <option value="historical">24 Hours Ago</option>
-                </select>
-                
-                <button id="swapViews">⇄ Swap Views</button>
-            </div>
-            
-            <!-- Refresh Controls -->
-            <div class="control-group">
-                <button id="refreshBtn">🔄 Refresh Now</button>
-                <div id="lastUpdate">Last update: --:--</div>
-                <div id="nextUpdate" class="next-update"><span id="refreshIntervalNote"></span>Next: <span id="nextUpdateTime">--</span></div>
-            </div>
-            
-            <!-- Layer Toggles -->
-            <div class="control-group">
-                <label>Display Layers:</label>
-                <div class="checkbox-group">
-                    <label><input type="checkbox" id="toggleGrid" checked> Grid Mesh</label>
-                    <label><input type="checkbox" id="togglePoints"> Weather Points</label>
-                    <label><input type="checkbox" id="toggleWind"> Wind Vectors</label>
-                    <label><input type="checkbox" id="toggleAlerts" checked> Weather Alerts</label>
-                </div>
-            </div>
-            
-            <!-- Data Source Status -->
-            <div class="control-group">
-                <div class="data-status">
-                    <div id="dataSource" class="data-status__line">
-                        <span class="data-status__label">Data</span>
-                        <span class="data-status__value" id="sourceStatus">Initializing…</span>
+                <div id="mapTaskbarBody" class="map-taskbar__body panel-body">
+                    <div class="map-taskbar__col map-taskbar__col--legend">
+                        <div
+                            id="coralGablesLive"
+                            class="coral-gables-live"
+                            aria-label="Current conditions at Coral Gables"
+                        >
+                            <h4>Coral Gables (live)</h4>
+                            <div id="cgLiveTemp" class="cg-live-temp">--°F</div>
+                            <p id="cgLiveWind" class="cg-live-wind">Wind: —</p>
+                            <p id="cgLiveCondition" class="cg-live-condition">—</p>
+                            <small id="cgLiveSource" class="cg-live-source"></small>
+                        </div>
+                        <h3 class="map-taskbar__legend-heading">Temperature Scale</h3>
+                        <div id="tempGradient" class="gradient-bar"></div>
+                        <div class="scale-labels">
+                            <span id="minTemp">--°F</span>
+                            <span id="maxTemp">--°F</span>
+                        </div>
+                        <div class="elevation-scale">
+                            <p>Height = Temperature</p>
+                            <small>Warmer areas rise higher</small>
+                        </div>
+                        <div class="mode-display">
+                            <strong>Mode: <span id="currentModeText">Current</span></strong>
+                        </div>
                     </div>
-                    <div id="apiSources" class="data-status__apis" aria-label="Active API sources"></div>
-                    <div class="data-status__stations" aria-label="Station fetch status">
-                        <span class="data-status__label">Stations</span>
-                        <span class="data-status__value">
-                            <span id="successCount">0</span> ok · <span id="failedCount">0</span> failed ·
-                            <span id="stationTotal">17</span> total
-                        </span>
+                    <div class="map-taskbar__col map-taskbar__col--controls">
+                        <div class="control-group control-group--tip">
+                            <small>💡 Click grid cells for details</small>
+                        </div>
+
+                        <!-- Scene atmosphere: time-of-day + rain (Esri sun + weather) -->
+                        <div
+                            id="lightingTestHud"
+                            class="control-group lighting-test-hud lighting-test-hud--panel"
+                            aria-label="Scene atmosphere"
+                            hidden
+                        >
+                            <label for="sceneTimePresetSelect">Time of day</label>
+                            <select id="sceneTimePresetSelect" class="lighting-test-hud-select">
+                                <option value="live">Live (real clock)</option>
+                                <option value="morning">Morning</option>
+                                <option value="midday">Midday</option>
+                                <option value="evening">Evening</option>
+                                <option value="night">Night</option>
+                            </select>
+                            <label for="sceneWeatherSelect">Weather</label>
+                            <select
+                                id="sceneWeatherSelect"
+                                class="lighting-test-hud-select"
+                                title="Matches ArcGIS scene weather presets (SunnyWeather … FoggyWeather)"
+                            >
+                                <option value="sunny">Sunny</option>
+                                <option value="cloudy">Cloudy</option>
+                                <option value="rainy">Rainy</option>
+                                <option value="snowy">Snowy</option>
+                                <option value="foggy">Foggy</option>
+                            </select>
+                            <div id="lightingHudSimTime" class="lighting-test-hud-time">—</div>
+                            <div id="lightingHudOffset" class="lighting-test-hud-offset"></div>
+                        </div>
+
+                        <!-- Grid Look preset (default: Gulf Glass) -->
+                        <div class="control-group control-group--map-style">
+                            <label for="mapVisualStyleSelect">Grid Look</label>
+                            <select
+                                id="mapVisualStyleSelect"
+                                title="Gulf Glass = daily driver; Basic Grid = legend temp colors; Tidefield = ripples + membrane + tethers"
+                            >
+                                <option value="gulf-glass">Gulf Glass</option>
+                                <option value="basic-grid">Basic Grid</option>
+                                <option value="tidefield-membrane">Tidefield Membrane</option>
+                            </select>
+                            <small class="control-hint"
+                                >All grid looks use the same four-stop temperature scale (legend). Gulf /
+                                Basic / Tidefield differ in mesh style and Tidefield adds the membrane
+                                layer.</small
+                            >
+                        </div>
+
+                        <!-- Mode Selector -->
+                        <div class="control-group">
+                            <label>View Mode:</label>
+                            <select id="modeSelector">
+                                <option value="current">Current Conditions</option>
+                                <option value="forecast-3h">3-Hour Forecast</option>
+                                <option value="forecast-24h">24-Hour Forecast</option>
+                                <option value="historical">Historical Playback</option>
+                                <option value="split-screen">Split-Screen Compare</option>
+                            </select>
+                        </div>
+
+                        <!-- Historical Playback Controls -->
+                        <div id="playbackControls" class="control-group hidden">
+                            <label>Timeline (Last 48 Hours):</label>
+                            <input type="range" id="timelineSlider" min="0" max="100" value="100" />
+                            <div class="playback-buttons">
+                                <button id="playBtn">▶ Play</button>
+                                <button id="pauseBtn" class="hidden">⏸ Pause</button>
+                                <select id="speedSelector">
+                                    <option value="1">1x</option>
+                                    <option value="2" selected>2x</option>
+                                    <option value="4">4x</option>
+                                </select>
+                            </div>
+                            <div id="currentTimestamp"></div>
+                            <div class="timeline-info">
+                                <small>Snapshots: <span id="snapshotCount">0</span></small>
+                            </div>
+                        </div>
+
+                        <!-- Split-Screen Controls -->
+                        <div id="splitScreenControls" class="control-group hidden">
+                            <label>Left View:</label>
+                            <select id="leftViewMode">
+                                <option value="current">Current</option>
+                                <option value="forecast-3h">3-Hr Forecast</option>
+                                <option value="forecast-24h">24-Hr Forecast</option>
+                                <option value="historical">24 Hours Ago</option>
+                            </select>
+
+                            <label>Right View:</label>
+                            <select id="rightViewMode">
+                                <option value="forecast-3h" selected>3-Hr Forecast</option>
+                                <option value="current">Current</option>
+                                <option value="forecast-24h">24-Hr Forecast</option>
+                                <option value="historical">24 Hours Ago</option>
+                            </select>
+
+                            <button id="swapViews">⇄ Swap Views</button>
+                        </div>
+
+                        <!-- Refresh Controls -->
+                        <div class="control-group">
+                            <button id="refreshBtn">🔄 Refresh Now</button>
+                            <div id="lastUpdate">Last update: --:--</div>
+                            <div id="nextUpdate" class="next-update">
+                                <span id="refreshIntervalNote"></span>Next:
+                                <span id="nextUpdateTime">--</span>
+                            </div>
+                        </div>
+
+                        <!-- Layer Toggles -->
+                        <div class="control-group">
+                            <label>Display Layers:</label>
+                            <div class="checkbox-group">
+                                <label><input type="checkbox" id="toggleGrid" checked /> Grid Mesh</label>
+                                <label><input type="checkbox" id="togglePoints" /> Weather Points</label>
+                                <label><input type="checkbox" id="toggleWind" /> Wind Vectors</label>
+                                <label
+                                    ><input type="checkbox" id="toggleAlerts" checked /> Weather Alerts</label
+                                >
+                            </div>
+                        </div>
+
+                        <!-- Data Source Status -->
+                        <div class="control-group">
+                            <div class="data-status">
+                                <div id="dataSource" class="data-status__line">
+                                    <span class="data-status__label">Data</span>
+                                    <span class="data-status__value" id="sourceStatus">Initializing…</span>
+                                </div>
+                                <div
+                                    id="apiSources"
+                                    class="data-status__apis"
+                                    aria-label="Active API sources"
+                                ></div>
+                                <div class="data-status__stations" aria-label="Station fetch status">
+                                    <span class="data-status__label">Stations</span>
+                                    <span class="data-status__value">
+                                        <span id="successCount">0</span> ok ·
+                                        <span id="failedCount">0</span> failed ·
+                                        <span id="stationTotal">17</span> total
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
+
+            <!-- Weather alert toasts (top center of map; see main.js) -->
+            <div id="alertToastHost" class="alert-toast-host" aria-live="polite"></div>
+
+            <!-- Loading Indicator -->
+            <div id="loadingIndicator" class="hidden">
+                <div class="spinner"></div>
+                <p id="loadingMessage">Loading weather data...</p>
             </div>
-            </div>
+
+            <!-- Headless Esri Weather widget mount (styled via #app-critical-shell until JS adds classes) -->
+            <div id="esriWeatherWidgetHost" aria-hidden="true"></div>
         </div>
-        
-        <!-- Weather alert toasts (top center of map; see main.js) -->
-        <div id="alertToastHost" class="alert-toast-host" aria-live="polite"></div>
-        
-        <!-- Loading Indicator -->
-        <div id="loadingIndicator" class="hidden">
-            <div class="spinner"></div>
-            <p id="loadingMessage">Loading weather data...</p>
-        </div>
-        
-        <!-- Headless Esri Weather widget mount (styled via #app-critical-shell until JS adds classes) -->
-        <div id="esriWeatherWidgetHost" aria-hidden="true"></div>
-    </div>
-</body>
+    </body>
 </html>

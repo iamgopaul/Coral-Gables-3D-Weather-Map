@@ -7,15 +7,15 @@ import { CONFIG } from './config.js';
 export function generateSamplingPoints() {
     const points = [];
     const { north, south, east, west } = CONFIG.GRID_EXTENT;
-    
+
     // Calculate spacing
     const latSpan = north - south;
     const lonSpan = east - west;
-    
+
     // North row (5 points)
-    const northLat = north - (latSpan * 0.1);
+    const northLat = north - latSpan * 0.1;
     for (let i = 0; i < 5; i++) {
-        const lon = west + (lonSpan * (i / 4));
+        const lon = west + lonSpan * (i / 4);
         points.push({
             id: `north_${i}`,
             latitude: northLat,
@@ -24,11 +24,11 @@ export function generateSamplingPoints() {
             index: i
         });
     }
-    
+
     // Middle row (5 points including center)
-    const middleLat = south + (latSpan * 0.5);
+    const middleLat = south + latSpan * 0.5;
     for (let i = 0; i < 5; i++) {
-        const lon = west + (lonSpan * (i / 4));
+        const lon = west + lonSpan * (i / 4);
         const isCenter = i === 2;
         points.push({
             id: isCenter ? 'center' : `middle_${i}`,
@@ -39,11 +39,11 @@ export function generateSamplingPoints() {
             isCenter
         });
     }
-    
+
     // South row (5 points)
-    const southLat = south + (latSpan * 0.1);
+    const southLat = south + latSpan * 0.1;
     for (let i = 0; i < 5; i++) {
-        const lon = west + (lonSpan * (i / 4));
+        const lon = west + lonSpan * (i / 4);
         points.push({
             id: `south_${i}`,
             latitude: southLat,
@@ -52,13 +52,13 @@ export function generateSamplingPoints() {
             index: i
         });
     }
-    
+
     // Mid-layer points (2 additional points)
     // Position between north-center and center-south
-    const midNorthLat = south + (latSpan * 0.7);
-    const midSouthLat = south + (latSpan * 0.3);
-    const midLon = west + (lonSpan * 0.5); // Center longitude
-    
+    const midNorthLat = south + latSpan * 0.7;
+    const midSouthLat = south + latSpan * 0.3;
+    const midLon = west + lonSpan * 0.5; // Center longitude
+
     points.push({
         id: 'mid_layer_north',
         latitude: midNorthLat,
@@ -66,7 +66,7 @@ export function generateSamplingPoints() {
         row: 'mid-layer',
         index: 0
     });
-    
+
     points.push({
         id: 'mid_layer_south',
         latitude: midSouthLat,
@@ -74,7 +74,7 @@ export function generateSamplingPoints() {
         row: 'mid-layer',
         index: 1
     });
-    
+
     return points;
 }
 
@@ -82,14 +82,14 @@ export function generateSamplingPoints() {
  * Get sampling point by ID
  */
 export function getSamplingPoint(points, id) {
-    return points.find(point => point.id === id);
+    return points.find((point) => point.id === id);
 }
 
 /**
  * Get all sampling points in a specific row
  */
 export function getPointsByRow(points, row) {
-    return points.filter(point => point.row === row);
+    return points.filter((point) => point.row === row);
 }
 
 /**
@@ -100,12 +100,11 @@ export function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // Earth's radius in km
     const dLat = toRadians(lat2 - lat1);
     const dLon = toRadians(lon2 - lon1);
-    
-    const a = 
+
+    const a =
         Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) *
-        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    
+        Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
 }

@@ -12,16 +12,16 @@ let db = null;
 export async function initDB() {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(CONFIG.DB_NAME, CONFIG.DB_VERSION);
-        
+
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
             db = request.result;
             resolve(db);
         };
-        
+
         request.onupgradeneeded = (event) => {
             const database = event.target.result;
-            
+
             // Create weather data store
             if (!database.objectStoreNames.contains(CONFIG.STORE_WEATHER_DATA)) {
                 const weatherStore = database.createObjectStore(CONFIG.STORE_WEATHER_DATA, {
@@ -31,7 +31,7 @@ export async function initDB() {
                 weatherStore.createIndex('timestamp', 'timestamp', { unique: false });
                 weatherStore.createIndex('pointId', 'pointId', { unique: false });
             }
-            
+
             // Create alerts store
             if (!database.objectStoreNames.contains(CONFIG.STORE_ALERTS)) {
                 const alertsStore = database.createObjectStore(CONFIG.STORE_ALERTS, {
@@ -48,16 +48,16 @@ export async function initDB() {
  */
 export async function storeWeatherSnapshot(weatherData) {
     if (!db) await initDB();
-    
+
     return new Promise((resolve, reject) => {
         const transaction = db.transaction([CONFIG.STORE_WEATHER_DATA], 'readwrite');
         const store = transaction.objectStore(CONFIG.STORE_WEATHER_DATA);
-        
+
         const snapshot = {
             timestamp: Date.now(),
             data: weatherData
         };
-        
+
         const request = store.add(snapshot);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
@@ -69,15 +69,15 @@ export async function storeWeatherSnapshot(weatherData) {
  */
 export async function getWeatherHistory(startTime, endTime) {
     if (!db) await initDB();
-    
+
     return new Promise((resolve, reject) => {
         const transaction = db.transaction([CONFIG.STORE_WEATHER_DATA], 'readonly');
         const store = transaction.objectStore(CONFIG.STORE_WEATHER_DATA);
         const index = store.index('timestamp');
-        
+
         const range = IDBKeyRange.bound(startTime, endTime);
         const request = index.getAll(range);
-        
+
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
     });
@@ -88,14 +88,14 @@ export async function getWeatherHistory(startTime, endTime) {
  */
 export async function getLatestSnapshot() {
     if (!db) await initDB();
-    
+
     return new Promise((resolve, reject) => {
         const transaction = db.transaction([CONFIG.STORE_WEATHER_DATA], 'readonly');
         const store = transaction.objectStore(CONFIG.STORE_WEATHER_DATA);
         const index = store.index('timestamp');
-        
+
         const request = index.openCursor(null, 'prev');
-        
+
         request.onsuccess = () => {
             const cursor = request.result;
             resolve(cursor ? cursor.value : null);
@@ -109,17 +109,17 @@ export async function getLatestSnapshot() {
  */
 export async function cleanOldData() {
     if (!db) await initDB();
-    
+
     const cutoffTime = Date.now() - CONFIG.HISTORICAL_DATA_RETENTION;
-    
+
     return new Promise((resolve, reject) => {
         const transaction = db.transaction([CONFIG.STORE_WEATHER_DATA], 'readwrite');
         const store = transaction.objectStore(CONFIG.STORE_WEATHER_DATA);
         const index = store.index('timestamp');
-        
+
         const range = IDBKeyRange.upperBound(cutoffTime);
         const request = index.openCursor(range);
-        
+
         let deleteCount = 0;
         request.onsuccess = () => {
             const cursor = request.result;
@@ -141,16 +141,16 @@ export async function cleanOldData() {
  */
 export async function storeAlert(alert) {
     if (!db) await initDB();
-    
+
     return new Promise((resolve, reject) => {
         const transaction = db.transaction([CONFIG.STORE_ALERTS], 'readwrite');
         const store = transaction.objectStore(CONFIG.STORE_ALERTS);
-        
+
         const alertWithTimestamp = {
             ...alert,
             storedAt: Date.now()
         };
-        
+
         const request = store.put(alertWithTimestamp);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
@@ -162,18 +162,16 @@ export async function storeAlert(alert) {
  */
 export async function getActiveAlerts() {
     if (!db) await initDB();
-    
+
     return new Promise((resolve, reject) => {
         const transaction = db.transaction([CONFIG.STORE_ALERTS], 'readonly');
         const store = transaction.objectStore(CONFIG.STORE_ALERTS);
-        
+
         const request = store.getAll();
-        
+
         request.onsuccess = () => {
             const now = Date.now();
-            const activeAlerts = request.result.filter(alert => 
-                alert.expires > now
-            );
+            const activeAlerts = request.result.filter((alert) => alert.expires > now);
             resolve(activeAlerts);
         };
         request.onerror = () => reject(request.error);
@@ -185,16 +183,16 @@ export async function getActiveAlerts() {
  */
 export async function clearExpiredAlerts() {
     if (!db) await initDB();
-    
+
     const now = Date.now();
-    
+
     return new Promise((resolve, reject) => {
         const transaction = db.transaction([CONFIG.STORE_ALERTS], 'readwrite');
         const store = transaction.objectStore(CONFIG.STORE_ALERTS);
-        
+
         const request = store.openCursor();
         let deleteCount = 0;
-        
+
         request.onsuccess = () => {
             const cursor = request.result;
             if (cursor) {

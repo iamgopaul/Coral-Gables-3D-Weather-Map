@@ -105,7 +105,13 @@ function seedBaseRings(ctx) {
 }
 
 function rebuildTethers(ctx, samplingPoints) {
-    if (!CONFIG.TIDEfield_TETHERS_ENABLED || !ctx.tetherLayer || !mods.Graphic || !mods.Polyline || !mods.SimpleLineSymbol) {
+    if (
+        !CONFIG.TIDEfield_TETHERS_ENABLED ||
+        !ctx.tetherLayer ||
+        !mods.Graphic ||
+        !mods.Polyline ||
+        !mods.SimpleLineSymbol
+    ) {
         return;
     }
     const { Graphic, Polyline, SimpleLineSymbol } = mods;

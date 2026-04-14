@@ -24,40 +24,40 @@ export async function fetchCurrentWeather(latitude, longitude) {
         const pointsResponse = await fetch(pointsUrl, {
             headers: nwsHeaders()
         });
-        
+
         if (!pointsResponse.ok) {
             throw new Error(`NOAA Points API error: ${pointsResponse.status}`);
         }
-        
+
         const pointsData = await pointsResponse.json();
-        
+
         // Step 2: Get observation stations
         const stationsUrl = pointsData.properties.observationStations;
         const stationsResponse = await fetch(stationsUrl, {
             headers: nwsHeaders()
         });
-        
+
         if (!stationsResponse.ok) {
             throw new Error(`NOAA Stations API error: ${stationsResponse.status}`);
         }
-        
+
         const stationsData = await stationsResponse.json();
-        
+
         // Step 3: Get latest observation from nearest station
         if (!stationsData.features || stationsData.features.length === 0) {
             throw new Error('No observation stations found');
         }
-        
+
         const nearestStation = stationsData.features[0].id;
         const observationUrl = `${nearestStation}/observations/latest`;
         const observationResponse = await fetch(observationUrl, {
             headers: nwsHeaders()
         });
-        
+
         if (!observationResponse.ok) {
             throw new Error(`NOAA Observation API error: ${observationResponse.status}`);
         }
-        
+
         const observationData = await observationResponse.json();
         return parseNOAAObservation(observationData);
     } catch (error) {
@@ -76,23 +76,23 @@ export async function fetchForecast(latitude, longitude) {
         const pointsResponse = await fetch(pointsUrl, {
             headers: nwsHeaders()
         });
-        
+
         if (!pointsResponse.ok) {
             throw new Error(`NOAA Points API error: ${pointsResponse.status}`);
         }
-        
+
         const pointsData = await pointsResponse.json();
-        
+
         // Get hourly forecast
         const forecastUrl = pointsData.properties.forecastHourly;
         const forecastResponse = await fetch(forecastUrl, {
             headers: nwsHeaders()
         });
-        
+
         if (!forecastResponse.ok) {
             throw new Error(`NOAA Forecast API error: ${forecastResponse.status}`);
         }
-        
+
         const forecastData = await forecastResponse.json();
         return parseNOAAForecast(forecastData);
     } catch (error) {
@@ -113,7 +113,9 @@ export async function fetchWeatherAlerts(latitude, longitude) {
 
         if (!response.ok) {
             const errBody = await response.text().catch(() => '');
-            throw new Error(`NOAA Alerts API error: ${response.status}${errBody ? ` — ${errBody.slice(0, 160)}` : ''}`);
+            throw new Error(
+                `NOAA Alerts API error: ${response.status}${errBody ? ` — ${errBody.slice(0, 160)}` : ''}`
+            );
         }
 
         const data = await response.json();
@@ -186,7 +188,8 @@ function pickNoaaFeelsLikeF(props) {
  * Parse NOAA observation (api.weather.gov) — temps in °C from API; wind uses QuantitativeValue
  * (typically km/h). Output matches other providers: °F, mph, wind direction ° meteorological (from).
  */
-function parseNOAAObservation(data) {
+/** Exported for unit tests and tooling; same shape as api.weather.gov observation GeoJSON `properties`. */
+export function parseNOAAObservation(data) {
     const props = data.properties;
 
     const humidityRaw = props.relativeHumidity?.value;
@@ -229,9 +232,9 @@ function parseNOAAObservation(data) {
  */
 function parseNOAAForecast(data) {
     const periods = data.properties.periods;
-    
+
     return {
-        forecasts: periods.map(period => ({
+        forecasts: periods.map((period) => ({
             temperature: period.temperature,
             feelsLike: period.temperature, // NOAA doesn't provide feels-like in forecast
             humidity: period.relativeHumidity?.value || null,
@@ -331,10 +334,22 @@ function parseWindSpeed(speedStr) {
  */
 function parseWindDirection(dirStr) {
     const directions = {
-        'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5,
-        'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5,
-        'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5,
-        'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5
+        N: 0,
+        NNE: 22.5,
+        NE: 45,
+        ENE: 67.5,
+        E: 90,
+        ESE: 112.5,
+        SE: 135,
+        SSE: 157.5,
+        S: 180,
+        SSW: 202.5,
+        SW: 225,
+        WSW: 247.5,
+        W: 270,
+        WNW: 292.5,
+        NW: 315,
+        NNW: 337.5
     };
     return directions[dirStr] || 0;
 }
@@ -345,7 +360,7 @@ function parseWindDirection(dirStr) {
 export async function fetchBatchWeather(samplingPoints) {
     const results = [];
     const delayBetweenRequests = 200; // NOAA doesn't specify rate limits, be conservative
-    
+
     for (const point of samplingPoints) {
         try {
             const weatherData = await fetchCurrentWeather(point.latitude, point.longitude);
@@ -353,8 +368,8 @@ export async function fetchBatchWeather(samplingPoints) {
                 pointId: point.id,
                 ...weatherData
             });
-            
-            await new Promise(resolve => setTimeout(resolve, delayBetweenRequests));
+
+            await new Promise((resolve) => setTimeout(resolve, delayBetweenRequests));
         } catch (error) {
             console.error(`Failed to fetch NOAA weather for point ${point.id}:`, error);
             results.push({
@@ -363,6 +378,6 @@ export async function fetchBatchWeather(samplingPoints) {
             });
         }
     }
-    
+
     return results;
 }
