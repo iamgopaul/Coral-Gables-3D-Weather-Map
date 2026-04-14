@@ -21,7 +21,7 @@
 
 ## Documentation
 
-All project docs live under **`docs/`** (except this file).
+All project docs live under **`docs/`** (except this file). On GitHub, browsing to the **`docs/`** folder shows a rendered index in **[`docs/README.md`](docs/README.md)** (same idea as this file at the repo root).
 
 | Document                                       | Audience                                     |
 | ---------------------------------------------- | -------------------------------------------- |
