@@ -30,7 +30,8 @@ function debugLogToTerminalPlugin() {
                 } else {
                     console.log('[browser]', line);
                 }
-            } catch {
+            } catch (parseErr) {
+                console.error('[browser] __debug_log JSON parse failed:', parseErr?.message ?? parseErr);
                 console.log('[browser]', body);
             }
             res.statusCode = 204;

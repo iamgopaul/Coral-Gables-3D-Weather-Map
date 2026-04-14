@@ -16,7 +16,8 @@ export async function getHistoricalSnapshots() {
         const snapshots = await DB.getWeatherHistory(startTime, endTime);
         return snapshots.sort((a, b) => a.timestamp - b.timestamp);
     } catch (error) {
-        console.error('Failed to get historical snapshots:', error);
+        const msg = error && error.message ? error.message : String(error);
+        console.error('[historical] Failed to get snapshots:', msg, error);
         return [];
     }
 }

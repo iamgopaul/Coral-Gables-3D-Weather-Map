@@ -53,7 +53,7 @@ export const MERGE_PRIORITY_NOAA_FIRST = {
  * @param {object[]} sources Parsed objects with a `source` field
  * @param {Record<string, number>} mergePriority Lower number = higher priority per field
  */
-function mergeWeatherData(sources, mergePriority = MERGE_PRIORITY_DEFAULT) {
+export function mergeWeatherData(sources, mergePriority = MERGE_PRIORITY_DEFAULT) {
     const merged = {};
 
     // Collect all fields from all sources with priority scoring
@@ -157,9 +157,9 @@ export async function fetchCurrentWeather(latitude, longitude, options = {}) {
  * Pick the forecast period with timestamp closest to `targetMs`.
  * @param {{ timestamp?: number }[]} periods
  * @param {number} targetMs
- * @returns {{ timestamp?: number, pressure?: number|null }|null}
+ * @returns {{ timestamp?: number, pressure?: number|null, windGust?: number|null }|null}
  */
-function findClosestForecastPeriodByTime(periods, targetMs) {
+export function findClosestForecastPeriodByTime(periods, targetMs) {
     if (!Array.isArray(periods) || periods.length === 0) {
         return null;
     }
@@ -184,21 +184,24 @@ function findClosestForecastPeriodByTime(periods, targetMs) {
 }
 
 /**
- * NOAA hourly often wins on period count but omits pressure. Fill `pressure` (mb) from
- * Open-Meteo / OpenWeatherMap by closest timestamp.
+ * When the chosen forecast source (often NOAA) omits a numeric field, copy from Open-Meteo
+ * then OpenWeatherMap using the closest period by `timestamp`.
  * @param {{ forecasts?: object[] }} best
  * @param {object[]} sources
+ * @param {'pressure'|'windGust'} field
+ * @param {(n: number) => number} transform
  */
-function enrichForecastPressureFromSources(best, sources) {
+function enrichForecastFieldFromDonors(best, sources, field, transform) {
     if (!best?.forecasts?.length || !sources?.length) {
         return;
     }
     const donors = ['Open-Meteo', 'OpenWeatherMap']
         .map((name) => sources.find((s) => s && s.source === name))
-        .filter((s) => Array.isArray(s.forecasts) && s.forecasts.length > 0);
+        .filter((s) => s && Array.isArray(s.forecasts) && s.forecasts.length > 0);
 
     for (const period of best.forecasts) {
-        if (period.pressure != null && Number.isFinite(Number(period.pressure))) {
+        const cur = period[field];
+        if (cur != null && Number.isFinite(Number(cur))) {
             continue;
         }
         const t = Number(period.timestamp);
@@ -207,13 +210,32 @@ function enrichForecastPressureFromSources(best, sources) {
         }
         for (const donor of donors) {
             const match = findClosestForecastPeriodByTime(donor.forecasts, t);
-            const p = match?.pressure;
-            if (p != null && Number.isFinite(Number(p))) {
-                period.pressure = Math.round(Number(p));
+            const v = match?.[field];
+            if (v != null && Number.isFinite(Number(v))) {
+                period[field] = transform(Number(v));
                 break;
             }
         }
     }
+}
+
+/**
+ * NOAA hourly often wins on period count but omits pressure. Fill `pressure` (mb) from
+ * Open-Meteo / OpenWeatherMap by closest timestamp.
+ * @param {{ forecasts?: object[] }} best
+ * @param {object[]} sources
+ */
+export function enrichForecastPressureFromSources(best, sources) {
+    enrichForecastFieldFromDonors(best, sources, 'pressure', (n) => Math.round(n));
+}
+
+/**
+ * Same pattern as pressure: NOAA periods omit gusts; fill `windGust` (mph) from donors.
+ * @param {{ forecasts?: object[] }} best
+ * @param {object[]} sources
+ */
+export function enrichForecastWindGustFromSources(best, sources) {
+    enrichForecastFieldFromDonors(best, sources, 'windGust', (n) => Math.round(n * 10) / 10);
 }
 
 /**
@@ -254,7 +276,12 @@ export async function fetchForecast(latitude, longitude) {
     }
 
     best.sources = sources.map((s) => s.source).join(', ');
-    enrichForecastPressureFromSources(best, sources);
+    try {
+        enrichForecastPressureFromSources(best, sources);
+        enrichForecastWindGustFromSources(best, sources);
+    } catch (enrichErr) {
+        console.error('Forecast field enrichment (pressure/gust) failed:', enrichErr);
+    }
 
     return best;
 }

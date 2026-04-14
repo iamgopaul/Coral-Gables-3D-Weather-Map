@@ -4,7 +4,7 @@
 
 ## Features
 
-- **Multi-source weather merge** — Open‑Meteo, OpenWeatherMap (optional), and NOAA/NWS (Weather.gov) merged per-field.
+- **Multi-source weather merge** — Open‑Meteo, OpenWeatherMap (optional), and NOAA/NWS (Weather.gov) merged per-field for **current** conditions; **forecast** mode uses the provider with the longest hourly timeline (often NWS), then fills **pressure** and **wind gust** from other providers when missing (see [Forecast & merge](#forecast--merge) below).
 - **Wind vectors** — directional arrows at each sampling point, area-mean wind at the city marker, and popups with speed and compass direction.
 - **3D temperature surface** — relief-style mesh driven by the station field (interpolated between stations); grid looks include **Gulf Glass** (translucent), Basic Grid, and Tidefield Membrane.
 - **Modes** — current, forecast, historical playback, and **split-screen compare** (linked popups and wind selection across panes).
@@ -25,12 +25,12 @@
 coral-gables-weather-grid/
 ├── run.sh                  # install, optional --check, build, preview (see Run locally)
 ├── index.html              # Entry (serve over HTTP, not file://)
-├── vite.config.js          # Dev server + production build
+├── vite.config.js          # Dev server + build; forwards browser logs to terminal (`/__debug_log`)
 ├── eslint.config.js        # ESLint flat config
 ├── vitest.config.js        # Unit tests (Vitest)
 ├── package.json
 ├── .env.example            # Copy → `.env` for API keys (see `.gitignore`; example file is tracked)
-├── tests/                  # Vitest specs (time helpers, NOAA wind, IDW interpolation)
+├── tests/                  # Vitest: time helpers, NOAA wind, IDW, weatherService merge
 ├── .github/workflows/ci.yml
 ├── styles/main.css
 ├── js/
@@ -106,6 +106,16 @@ npx http-server -p 8000 -c-1 -a 127.0.0.1
 
 If you bind to all interfaces, scanners may probe the port; paths like `${jndi:…}` or `POST /onvif/device_service` are **not from this app** — automated probes against open ports.
 
+## Forecast & merge
+
+- **Current weather** — Field-by-field merge with configurable priority (`js/api/weatherService.js`), typically NOAA-first for the Coral Gables center and blended sources for grid stations.
+- **Forecast batch** — Each station calls Open‑Meteo, OpenWeatherMap (if key), and NOAA; the result with the **most forecast periods** is used as the base timeline (often **NWS hourly**).
+- **Pressure & gust** — If that base forecast omits **mean sea-level pressure** or **wind gust**, values are copied from Open‑Meteo, then OpenWeatherMap, using the period **closest in time** to each step.
+- **3h / 24h views** — The app picks the forecast period whose timestamp is **nearest** to “now + 3 hours” or “now + 24 hours” (not necessarily an exact clock step).
+- **Map grid** — Cells use **inverse-distance weighting** between station forecasts; this smooths spatially and is not a mesoscale model.
+
+Forecast skill is limited by the providers; the app does not run its own NWP.
+
 ## Configuration
 
 - **Secrets** — Root **`.env`** or **`.env.local`** (copy from **`.env.example`**). Vite only exposes variables prefixed with `VITE_`.
@@ -137,12 +147,15 @@ Locally, **`./run.sh --check`** runs lint, format check, and tests before build 
 - **View mode** (control panel): Current, forecasts, Historical, **Split-Screen Compare**.
 - **Split-screen**: Choose left/right data sources; both panes stay camera-linked; grid, point, and wind clicks can show linked popups.
 - **Debug console**: Press **`D`** to toggle the in-app log.
+- **Terminal logs (Vite dev / preview)**: In-app `debugLog` output is also sent to the **Node process** (`[browser] …` on stdout/stderr) via `POST /__debug_log` in `vite.config.js` — useful when `./run.sh` or `npm run dev` / `preview` is running.
+
+Unhandled promise rejections and uncaught errors are logged to both the browser console and that stream.
 
 ## Roadmap / potential future updates
 
 Planned or under consideration (not commitments):
 
-- **Data accuracy** — Tighter station metadata, additional validation layers, calibration against ground truth, and clearer uncertainty or confidence in merged fields where APIs disagree.
+- **Data accuracy** — Tighter station metadata, optional per-field confidence when APIs disagree, or stricter time alignment for enriched forecast fields.
 - **Graph visualizations** — Charts and time-series views (e.g. temperature and wind trends, forecast strips, historical comparison) beyond the 3D scene and legend.
 - **Carbon sequestration** — Contextual environmental layers or estimates (e.g. urban green space, rough CO₂ or biomass proxies) to sit alongside weather for sustainability and education; would require vetted datasets and clear methodology in the UI.
 

@@ -15,14 +15,14 @@ import { calculateDistance } from '../samplingPoints.js';
  * @returns {number} Interpolated value
  */
 export function interpolate(targetLat, targetLon, samplingPoints, valueKey, power = 2) {
-    // Filter out points without valid data
-    const validPoints = samplingPoints.filter(
-        (point) =>
-            point.weatherData &&
-            point.weatherData[valueKey] !== null &&
-            point.weatherData[valueKey] !== undefined &&
-            !point.weatherData.error
-    );
+    // Filter out points without valid numeric data (NaN must not participate in IDW).
+    const validPoints = samplingPoints.filter((point) => {
+        if (!point.weatherData || point.weatherData.error) {
+            return false;
+        }
+        const v = point.weatherData[valueKey];
+        return v !== null && v !== undefined && Number.isFinite(Number(v));
+    });
 
     if (validPoints.length === 0) {
         return null;
@@ -124,7 +124,7 @@ export function detectHeatIslands(gridCells, threshold) {
 
     return gridCells.filter((cell) => {
         const temp = cell.interpolatedData?.temperature;
-        return temp && temp - avgTemp > threshold;
+        return temp != null && Number.isFinite(temp) && temp - avgTemp > threshold;
     });
 }
 
@@ -144,6 +144,6 @@ export function detectColdZones(gridCells, threshold) {
 
     return gridCells.filter((cell) => {
         const temp = cell.interpolatedData?.temperature;
-        return temp && avgTemp - temp > threshold;
+        return temp != null && Number.isFinite(temp) && avgTemp - temp > threshold;
     });
 }

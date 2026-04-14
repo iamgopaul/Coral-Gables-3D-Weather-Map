@@ -108,6 +108,10 @@ function parseForecastData(data) {
             pressure: item.main.pressure,
             windSpeed: item.wind.speed,
             windDirection: item.wind.deg,
+            windGust:
+                item.wind.gust != null && Number.isFinite(Number(item.wind.gust))
+                    ? Number(item.wind.gust)
+                    : null,
             precipitation: item.rain ? item.rain['3h'] || 0 : 0,
             cloudCover: item.clouds.all,
             weather: item.weather[0].main.toLowerCase(),

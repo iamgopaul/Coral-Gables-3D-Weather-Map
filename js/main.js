@@ -154,15 +154,11 @@ async function init() {
         const weatherPrefetchPromise = fetchWeatherFrameCore(null);
 
         /** Historical list for playback UI — loads in parallel; does not block scene or first weather paint. */
-        void TimeFeatures.getHistoricalSnapshots()
-            .then((snaps) => {
-                state.historicalSnapshots = snaps;
-                updateSnapshotCount();
-                debugLog(`✓ Loaded ${state.historicalSnapshots.length} historical snapshots`);
-            })
-            .catch(() => {
-                debugLog('⚠ No historical data yet (this is normal on first run)');
-            });
+        void TimeFeatures.getHistoricalSnapshots().then((snaps) => {
+            state.historicalSnapshots = snaps;
+            updateSnapshotCount();
+            debugLog(`✓ Loaded ${state.historicalSnapshots.length} historical snapshots`);
+        });
 
         // Initialize ArcGIS Scene
         await initArcGIS();
@@ -193,7 +189,9 @@ async function init() {
             debugLog('✓ Initial weather data loaded');
             scheduleWelcomeWeatherToast();
         } catch (refreshErr) {
-            debugLog('⚠ Initial weather fetch failed, grid showing with defaults', true);
+            const msg = refreshErr && refreshErr.message ? refreshErr.message : String(refreshErr);
+            console.error('Initial weather refresh failed:', refreshErr);
+            debugLog('⚠ Initial weather fetch failed, grid showing with defaults — ' + msg, true);
             scheduleWelcomeWeatherToast();
         }
 
@@ -1328,8 +1326,9 @@ async function fetchWeatherFrameCore(onProgress) {
                 centerPointId: 'center'
             });
         } catch (fetchError) {
+            const msg = fetchError && fetchError.message ? fetchError.message : String(fetchError);
             console.error('Weather fetch failed:', fetchError);
-            debugLog('⚠ Weather API error: ' + fetchError.message, true);
+            debugLog('⚠ Weather API error: ' + msg, true);
             weatherResults = [];
         }
 
@@ -1359,13 +1358,17 @@ async function persistWeatherSnapshotAndReloadHistory(weatherResults) {
         await DB.storeWeatherSnapshot(weatherResults);
         try {
             await DB.cleanOldData();
-        } catch {
-            /* non-fatal */
+        } catch (pruneErr) {
+            const pm = pruneErr && pruneErr.message ? pruneErr.message : String(pruneErr);
+            console.warn('DB prune (cleanOldData) failed:', pruneErr);
+            debugLog('⚠ Historical prune skipped: ' + pm, true);
         }
         state.historicalSnapshots = await TimeFeatures.getHistoricalSnapshots();
         updateSnapshotCount();
     } catch (dbError) {
-        console.warn('DB storage failed:', dbError);
+        const dm = dbError && dbError.message ? dbError.message : String(dbError);
+        console.error('DB storage / history reload failed:', dbError);
+        debugLog('⚠ Could not save snapshot or reload history: ' + dm, true);
     }
 }
 
@@ -1494,13 +1497,9 @@ async function refreshWeatherData(options = {}) {
         updateLastUpdateTime();
         updateCoralGablesLiveDisplay();
 
-        // Fetch forecasts if not already loaded (non-blocking for interaction)
-        try {
-            if (!state.forecastData || state.forecastData.length === 0) {
-                fetchForecastData();
-            }
-        } catch (forecastErr) {
-            debugLog('⚠ Forecast fetch skipped: ' + forecastErr.message);
+        // Fetch forecasts if not already loaded (non-blocking; errors logged inside fetchForecastData)
+        if (!state.forecastData || state.forecastData.length === 0) {
+            void fetchForecastData();
         }
 
         await persistWeatherSnapshotAndReloadHistory(weatherResults);
@@ -1510,20 +1509,25 @@ async function refreshWeatherData(options = {}) {
                 try {
                     await checkWeatherAlerts();
                 } catch (err) {
-                    debugLog('Alert check failed: ' + err.message);
+                    const am = err && err.message ? err.message : String(err);
+                    console.error('Alert check failed:', err);
+                    debugLog('⚠ Alert check failed: ' + am, true);
                 }
                 try {
                     maybeScheduleMicroclimateToast();
                 } catch (mcErr) {
+                    const mm = mcErr && mcErr.message ? mcErr.message : String(mcErr);
                     console.warn('Microclimate toast schedule:', mcErr);
+                    debugLog('⚠ Microclimate toast: ' + mm, true);
                 }
             })();
         });
 
         debugLog('✓ Refresh complete');
     } catch (error) {
+        const em = error && error.message ? error.message : String(error);
         console.error('Failed to refresh weather data:', error);
-        debugLog('✗ Refresh failed: ' + error.message, true);
+        debugLog('✗ Refresh failed: ' + em, true);
 
         // Update UI with error state
         showError('Weather refresh failed. Displaying last known data.');
@@ -1547,10 +1551,17 @@ async function fetchForecastData() {
     try {
         debugLog('Fetching forecast data...');
         state.forecastData = await WeatherService.fetchBatchForecast(state.samplingPoints);
-        debugLog(`✓ Forecast data loaded for ${state.forecastData.length} points`);
+        const rows = state.forecastData || [];
+        const ok = rows.filter((r) => r && r.success).length;
+        const failed = rows.length - ok;
+        debugLog(
+            `✓ Forecast batch finished: ${rows.length} point(s), ${ok} ok` +
+                (failed > 0 ? `, ${failed} failed` : '')
+        );
     } catch (error) {
+        const msg = error && error.message ? error.message : String(error);
         console.error('Forecast fetch failed:', error);
-        debugLog('⚠ Forecast unavailable');
+        debugLog('⚠ Forecast unavailable: ' + msg, true);
     }
 }
 
@@ -4299,6 +4310,8 @@ function wireSceneCameraDebugToTerminal(sceneView) {
 
 /**
  * Debug logging — browser console + terminal when using Vite dev or preview (`run.sh` uses preview).
+ * Errors (`isError === true`) use `console.error` and are mirrored to the Node process as stderr via
+ * `vite.config.js` → `POST /__debug_log`.
  */
 function debugLog(message, isError = false) {
     const line = `[${new Date().toLocaleTimeString()}] ${message}`;
@@ -4319,6 +4332,29 @@ function debugLog(message, isError = false) {
         /* no local server or static host — ignore */
     });
 }
+
+/**
+ * Surface unhandled rejections and uncaught exceptions in the UI log stream and terminal (via debugLog).
+ */
+function installGlobalErrorHandlers() {
+    if (typeof window === 'undefined') {
+        return;
+    }
+    window.addEventListener('unhandledrejection', (event) => {
+        const r = event.reason;
+        const msg = r && typeof r === 'object' && typeof r.message === 'string' ? r.message : String(r);
+        console.error('[unhandledrejection]', r);
+        debugLog('✗ Unhandled promise rejection: ' + msg, true);
+    });
+    window.addEventListener('error', (event) => {
+        const err = event.error;
+        const msg = err && typeof err.message === 'string' ? err.message : event.message || 'Unknown error';
+        console.error('[window error]', event.filename, event.lineno, err || event.message);
+        debugLog('✗ Uncaught error: ' + msg, true);
+    });
+}
+
+installGlobalErrorHandlers();
 
 // Initialize on load
 if (document.readyState === 'loading') {
