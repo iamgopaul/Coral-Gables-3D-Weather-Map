@@ -1,15 +1,16 @@
 # The Coral Gables Weather Radar
 
-3D **ArcGIS Maps SDK for JavaScript** app for Coral Gables, FL: live conditions, wind field arrows, forecasts, historical playback, split-screen comparison, and NWS alert toasts.
+3D **ArcGIS Maps SDK for JavaScript** app for Coral Gables, FL: live conditions, wind field arrows, forecasts, historical playback, split-screen comparison, and NWS alert toasts. The UI is responsive for desktop and mobile (bottom-sheet menu on narrow viewports).
 
 ## Features
 
 - **Multi-source weather merge** — Open‑Meteo, OpenWeatherMap (optional), and NOAA/NWS (Weather.gov) merged per-field.
-- **Wind vectors** — directional arrows at each sampling point + a dedicated Coral Gables indicator with popup.
-- **3D temperature surface** — relief-style mesh driven by the station field (interpolated between stations).
-- **Modes** — current, forecast, historical playback, and **split-screen compare**.
-- **Alerts & notices** — NWS alert feed toasts + themed “welcome” and microclimate notices.
+- **Wind vectors** — directional arrows at each sampling point, area-mean wind at the city marker, and popups with speed and compass direction.
+- **3D temperature surface** — relief-style mesh driven by the station field (interpolated between stations); grid looks include **Gulf Glass** (translucent), Basic Grid, and Tidefield Membrane.
+- **Modes** — current, forecast, historical playback, and **split-screen compare** (linked popups and wind selection across panes).
+- **Alerts & notices** — NWS alert feed toasts + themed welcome and microclimate notices (auto-dismiss timing configurable).
 - **Local history** — IndexedDB snapshots for playback.
+- **Sampling points** — popups include human-readable Coral Gables area labels and coordinates.
 
 ## Stack
 
@@ -39,12 +40,13 @@ coral-gables-weather-grid/
 │   │   └── noaa.js
 │   ├── storage/db.js
 │   ├── ui/
-│   │   └── dataStatus.js         # “Data / API sources / Stations” display helpers
-│   └── viz/
-│       └── wind.js               # Wind arrow rendering + CG indicator
+│   │   └── dataStatus.js         # Data / API sources / stations display
+│   ├── viz/
+│   │   └── wind.js               # Wind arrows + area-mean indicator
 │   └── utils/
 │       ├── interpolation.js
-│       └── gridGenerator.js
+│       ├── gridGenerator.js
+│       └── tempColors.js
 └── README.md
 ```
 
@@ -77,7 +79,7 @@ npm run build
 npm run preview
 ```
 
-- **`npm run build`** — output in `dist/` for static hosting (GitHub Pages, etc.). Keys from `.env` are **inlined into the JS bundle** at build time, so anyone can read them from the deployed files. For truly private keys, use a small backend proxy instead of client-only env.
+- **`npm run build`** — output in `dist/` for static hosting (e.g. Vercel, GitHub Pages). Keys from `.env` are **inlined into the JS bundle** at build time, so anyone can read them from the deployed files. For truly private keys, use a small backend proxy instead of client-only env.
 
 ### Optional: plain `http-server`
 
@@ -100,8 +102,16 @@ If you bind to all interfaces, scanners may probe the port; paths like `${jndi:�
 ## Usage highlights
 
 - **View mode** (control panel): Current, forecasts, Historical, **Split-Screen Compare**.
-- **Split-screen**: Choose left/right data sources; both panes stay aligned; grid/point clicks can show linked popups.
+- **Split-screen**: Choose left/right data sources; both panes stay camera-linked; grid, point, and wind clicks can show linked popups.
 - **Debug console**: Press **`D`** to toggle the in-app log.
+
+## Roadmap / potential future updates
+
+Planned or under consideration (not commitments):
+
+- **Data accuracy** — Tighter station metadata, additional validation layers, calibration against ground truth, and clearer uncertainty or confidence in merged fields where APIs disagree.
+- **Graph visualizations** — Charts and time-series views (e.g. temperature and wind trends, forecast strips, historical comparison) beyond the 3D scene and legend.
+- **Carbon sequestration** — Contextual environmental layers or estimates (e.g. urban green space, rough CO₂ or biomass proxies) to sit alongside weather for sustainability and education; would require vetted datasets and clear methodology in the UI.
 
 ## Browser support
 
