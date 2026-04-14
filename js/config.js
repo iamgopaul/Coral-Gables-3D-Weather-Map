@@ -1,11 +1,37 @@
+/// <reference types="vite/client" />
 // Configuration constants
+//
+// Secrets: root `.env` or `.env.local` — `VITE_OPENWEATHERMAP_API_KEY`, `VITE_ARCGIS_API_KEY` (see `.env.example`).
+// Use direct `import.meta.env.VITE_*` below so Vite can inline values at dev/build time.
+// Plain `http-server` on raw sources: `import.meta.env` is missing — try/catch yields empty keys.
+// Each secret uses a literal `import.meta.env.VITE_*` property so Vite can inline at dev/build.
+
+function readOpenWeatherMapKey() {
+    try {
+        return String(import.meta.env.VITE_OPENWEATHERMAP_API_KEY ?? '').trim();
+    } catch {
+        return '';
+    }
+}
+
+function readArcgisKey() {
+    try {
+        return String(import.meta.env.VITE_ARCGIS_API_KEY ?? '').trim();
+    } catch {
+        return '';
+    }
+}
+
+const OPENWEATHERMAP_API_KEY_FROM_ENV = readOpenWeatherMapKey();
+const ARCGIS_API_KEY_FROM_ENV = readArcgisKey();
+
 export const CONFIG = {
     // ArcGIS Configuration
     // WebScene: https://cggis.maps.arcgis.com/home/webscene/viewer.html?webscene=015327956f4a4785b2b689ab1a579489
     ARCGIS_WEBSCENE_ID: '015327956f4a4785b2b689ab1a579489',
     /** Portal where the WebScene item lives (public scene — no sign-in required) */
     ARCGIS_PORTAL_URL: 'https://cggis.maps.arcgis.com',
-    ARCGIS_API_KEY: '', // Optional API key for specific layers/services
+    ARCGIS_API_KEY: ARCGIS_API_KEY_FROM_ENV,
 
     /**
      * SceneView rendering quality (`low` | `medium` | `high`).
@@ -61,8 +87,8 @@ export const CONFIG = {
     /** Max time to wait for view.updating to settle after framing (ms) */
     SCENE_INITIAL_LOAD_MAX_WAIT_MS: 60000,
     
-    // Weather API Configuration — set your key for OpenWeatherMap (optional; Open-Meteo + NOAA still work)
-    OPENWEATHERMAP_API_KEY: '',
+    // Weather API — optional OpenWeatherMap (from `.env` via Vite); Open-Meteo + NOAA work without it
+    OPENWEATHERMAP_API_KEY: OPENWEATHERMAP_API_KEY_FROM_ENV,
     
     // Location Configuration
     CORAL_GABLES_CENTER: {

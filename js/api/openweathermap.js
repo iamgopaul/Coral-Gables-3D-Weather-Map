@@ -4,13 +4,26 @@ import { CONFIG } from '../config.js';
  * Fetch current weather data from OpenWeatherMap API
  */
 export async function fetchCurrentWeather(latitude, longitude) {
-    const url = `${CONFIG.OPENWEATHERMAP_CURRENT}?lat=${latitude}&lon=${longitude}&appid=${CONFIG.OPENWEATHERMAP_API_KEY}&units=imperial`;
-    
+    const key = String(CONFIG.OPENWEATHERMAP_API_KEY || '').trim();
+    if (!key) {
+        throw new Error('OpenWeatherMap API key is not configured');
+    }
+    const url = `${CONFIG.OPENWEATHERMAP_CURRENT}?lat=${latitude}&lon=${longitude}&appid=${key}&units=imperial`;
+
     try {
         const response = await fetch(url);
-        
+
         if (!response.ok) {
-            throw new Error(`OpenWeatherMap API error: ${response.status}`);
+            let detail = response.statusText || '';
+            try {
+                const errJson = await response.clone().json();
+                if (errJson?.message) {
+                    detail = String(errJson.message);
+                }
+            } catch {
+                /* ignore */
+            }
+            throw new Error(`OpenWeatherMap current weather: ${response.status}${detail ? ` — ${detail}` : ''}`);
         }
         
         const data = await response.json();
@@ -26,13 +39,26 @@ export async function fetchCurrentWeather(latitude, longitude) {
  * Returns 5-day forecast with 3-hour intervals
  */
 export async function fetchForecast(latitude, longitude) {
-    const url = `${CONFIG.OPENWEATHERMAP_FORECAST}?lat=${latitude}&lon=${longitude}&appid=${CONFIG.OPENWEATHERMAP_API_KEY}&units=imperial`;
-    
+    const key = String(CONFIG.OPENWEATHERMAP_API_KEY || '').trim();
+    if (!key) {
+        throw new Error('OpenWeatherMap API key is not configured');
+    }
+    const url = `${CONFIG.OPENWEATHERMAP_FORECAST}?lat=${latitude}&lon=${longitude}&appid=${key}&units=imperial`;
+
     try {
         const response = await fetch(url);
-        
+
         if (!response.ok) {
-            throw new Error(`OpenWeatherMap Forecast API error: ${response.status}`);
+            let detail = response.statusText || '';
+            try {
+                const errJson = await response.clone().json();
+                if (errJson?.message) {
+                    detail = String(errJson.message);
+                }
+            } catch {
+                /* ignore */
+            }
+            throw new Error(`OpenWeatherMap forecast: ${response.status}${detail ? ` — ${detail}` : ''}`);
         }
         
         const data = await response.json();

@@ -13,14 +13,18 @@ Interactive **ArcGIS Maps SDK for JavaScript** (3D) app: live and forecast weath
 ## Stack
 
 - ArcGIS JS API **4.29** (public WebScene; no app login required for the bundled scene).
-- Vanilla **ES modules** (`js/main.js`).
+- Vanilla **ES modules** (`js/main.js`), dev/build via **[Vite](https://vitejs.dev/)** (loads `.env` for keys).
 - **IndexedDB** (`js/storage/db.js`).
 
 ## Project layout
 
 ```
 coral-gables-weather-grid/
+├── run.sh                  # ./run.sh — npm install, .env bootstrap, build, preview (port 8000)
 ├── index.html              # Entry (serve over HTTP, not file://)
+├── vite.config.js          # Dev server + production build
+├── package.json
+├── .env.example            # Copy → `.env` for API keys (gitignored)
 ├── styles/main.css
 ├── js/
 │   ├── main.js             # Scene, UI, split-screen, visualization
@@ -43,28 +47,47 @@ coral-gables-weather-grid/
 
 The app must be served over **http** or **https** (the ArcGIS loader and modules will not work from `file://`).
 
+### Recommended: Vite (loads `.env` secrets)
+
+**One command** — installs dependencies, creates `.env` from the example if missing, **builds** production assets, then **serves** them (same as deploy, keys from `.env` inlined at build time):
+
 ```bash
-npx http-server -p 8000 -c-1
+./run.sh
 ```
 
-Open `http://localhost:8000/` (or your chosen port). Use a **hard refresh** after pulling changes if assets look stale (`index.html` may append cache-bust query params on scripts/styles).
+Open **`http://localhost:8000/`** after the build finishes. Keys in `.env` are **not committed** (`.gitignore`).
 
-**Listen only on this machine** (fewer random LAN/internet hits in your terminal):
+For a **fast dev loop** (no production build, HMR):
+
+```bash
+npm run dev
+```
+
+Or manually:
+
+```bash
+npm install
+cp .env.example .env
+npm run build
+npm run preview
+```
+
+- **`npm run build`** — output in `dist/` for static hosting (GitHub Pages, etc.). Keys from `.env` are **inlined into the JS bundle** at build time, so anyone can read them from the deployed files. For truly private keys, use a small backend proxy instead of client-only env.
+
+### Optional: plain `http-server`
+
+Without Vite, `import.meta.env` is unset and **API keys in config stay empty** (Open-Meteo + NOAA still work).
 
 ```bash
 npx http-server -p 8000 -c-1 -a 127.0.0.1
 ```
 
-If you bind to all interfaces (`0.0.0.0`, the default), scanners may probe the port; weird paths like `${jndi:…}` or `POST /onvif/device_service` are **not from this app** — they are automated exploit/camera probes against anything listening on that port. This static site does not run Log4j or ONVIF; you can ignore those lines or use `-a 127.0.0.1`.
+If you bind to all interfaces, scanners may probe the port; paths like `${jndi:…}` or `POST /onvif/device_service` are **not from this app** — automated probes against open ports.
 
 ## Configuration
 
-Edit **`js/config.js`** for:
-
-- WebScene / portal URLs, grid extent, refresh intervals.
-- **API keys** — OpenWeatherMap key belongs in config (do not commit real keys to public repos; use a private env or local override).
-
-Optional: `ARCGIS_API_KEY` if you add layers that require it.
+- **Secrets** — Root **`.env`** or **`.env.local`** (copy from **`.env.example`**): `VITE_OPENWEATHERMAP_API_KEY=your_key` (no spaces around `=`; name **must** start with `VITE_`). After changing `.env`, run **`./run.sh`** again so the production bundle picks up the new values. Vite inlines these into the built JS; `js/config.js` uses literal `import.meta.env.VITE_*` access so that inlining works.
+- **`js/config.js`** — WebScene / portal URLs, grid extent, refresh intervals, and all non-secret settings.
 
 ## Usage highlights
 

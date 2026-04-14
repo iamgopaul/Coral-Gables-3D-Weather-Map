@@ -33,7 +33,10 @@
     
     <!-- ArcGIS API for JavaScript 4.x -->
     <link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/light/main.css">
-    <link rel="stylesheet" href="styles/main.css?v=cg5">
+    <link rel="stylesheet" href="/styles/main.css">
+    <!-- ArcGIS must load before the app module (Vite may hoist the module into head). -->
+    <script src="https://js.arcgis.com/4.29/"></script>
+    <script type="module" src="/js/main.js"></script>
 </head>
 <body>
     <div id="app">
@@ -219,11 +222,5 @@
             <div id="debugOutput"></div>
         </div>
     </div>
-    
-    <!-- ArcGIS API -->
-    <script src="https://js.arcgis.com/4.29/"></script>
-    
-    <!-- Application Modules (v= cache-bust so first navigation matches refresh after deploy) -->
-    <script type="module" src="js/main.js?v=cg7"></script>
 </body>
 </html>

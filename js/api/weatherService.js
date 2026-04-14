@@ -1,3 +1,4 @@
+import { CONFIG } from '../config.js';
 import * as OpenWeatherMap from './openweathermap.js';
 import * as NOAA from './noaa.js';
 import * as OpenMeteo from './openmeteo.js';
@@ -6,6 +7,24 @@ import * as OpenMeteo from './openmeteo.js';
  * Unified weather service with intelligent multi-API merging
  * Pulls from OpenWeatherMap, Open-Meteo, and NOAA to get the best available data
  */
+
+let warnedMissingOpenWeatherMapKey = false;
+
+function isOpenWeatherMapConfigured() {
+    const k = CONFIG.OPENWEATHERMAP_API_KEY;
+    return typeof k === 'string' && k.trim().length > 0;
+}
+
+function warnOpenWeatherMapDisabled() {
+    if (warnedMissingOpenWeatherMapKey) {
+        return;
+    }
+    warnedMissingOpenWeatherMapKey = true;
+    console.warn(
+        '[weather] OpenWeatherMap is skipped: no API key. Set VITE_OPENWEATHERMAP_API_KEY in a root `.env` file ' +
+            '(see `.env.example` — the name must start with VITE_), then run `./run.sh` or `npm run dev` so Vite injects it.'
+    );
+}
 
 /** Lower number = wins when merging field-by-field (default: global models first). */
 export const MERGE_PRIORITY_DEFAULT = {
@@ -82,22 +101,33 @@ function mergeWeatherData(sources, mergePriority = MERGE_PRIORITY_DEFAULT) {
  */
 export async function fetchCurrentWeather(latitude, longitude, options = {}) {
     const mergePriority = options.mergePriority || MERGE_PRIORITY_DEFAULT;
-    const results = await Promise.allSettled([
-        OpenWeatherMap.fetchCurrentWeather(latitude, longitude),
-        OpenMeteo.fetchCurrentWeather(latitude, longitude),
-        NOAA.fetchCurrentWeather(latitude, longitude)
-    ]);
-    
+    const useOwm = isOpenWeatherMapConfigured();
+    if (!useOwm) {
+        warnOpenWeatherMapDisabled();
+    }
+
+    const promises = [];
+    const apiNames = [];
+    if (useOwm) {
+        promises.push(OpenWeatherMap.fetchCurrentWeather(latitude, longitude));
+        apiNames.push('OpenWeatherMap');
+    }
+    promises.push(OpenMeteo.fetchCurrentWeather(latitude, longitude));
+    apiNames.push('Open-Meteo');
+    promises.push(NOAA.fetchCurrentWeather(latitude, longitude));
+    apiNames.push('NOAA');
+
+    const results = await Promise.allSettled(promises);
+
     const sources = [];
-    
+
     // Log what each API returned
     results.forEach((result, index) => {
+        const api = apiNames[index];
         if (result.status === 'fulfilled' && result.value) {
             sources.push(result.value);
-            const api = ['OpenWeatherMap', 'Open-Meteo', 'NOAA'][index];
             console.log(`✓ ${api} returned:`, result.value);
         } else if (result.status === 'rejected') {
-            const api = ['OpenWeatherMap', 'Open-Meteo', 'NOAA'][index];
             console.warn(`✗ ${api} failed:`, result.reason?.message);
         }
     });
@@ -122,15 +152,22 @@ export async function fetchCurrentWeather(latitude, longitude, options = {}) {
  * Fetch forecast data from multiple sources with intelligent merging
  */
 export async function fetchForecast(latitude, longitude) {
-    const results = await Promise.allSettled([
-        OpenWeatherMap.fetchForecast(latitude, longitude),
-        OpenMeteo.fetchForecast(latitude, longitude),
-        NOAA.fetchForecast(latitude, longitude)
-    ]);
-    
+    const useOwm = isOpenWeatherMapConfigured();
+    if (!useOwm) {
+        warnOpenWeatherMapDisabled();
+    }
+    const promises = [];
+    if (useOwm) {
+        promises.push(OpenWeatherMap.fetchForecast(latitude, longitude));
+    }
+    promises.push(OpenMeteo.fetchForecast(latitude, longitude));
+    promises.push(NOAA.fetchForecast(latitude, longitude));
+
+    const results = await Promise.allSettled(promises);
+
     const sources = results
-        .filter(r => r.status === 'fulfilled')
-        .map(r => r.value)
+        .filter((r) => r.status === 'fulfilled')
+        .map((r) => r.value)
         .filter(Boolean);
     
     if (sources.length === 0) {
