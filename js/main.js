@@ -4141,7 +4141,7 @@ function updateDataSourceDisplay(successful, failed, activeApiSources = []) {
         if (isSampleData || !activeApiSources || activeApiSources.length === 0) {
             apisEl.textContent = '';
         } else {
-            apisEl.textContent = `Live Data: ${activeApiSources.join(', ')}`;
+            apisEl.textContent = activeApiSources.join(', ');
         }
     }
     if (okEl) {
