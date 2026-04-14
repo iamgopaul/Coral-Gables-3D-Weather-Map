@@ -4,8 +4,8 @@ import * as NOAA from './noaa.js';
 import * as OpenMeteo from './openmeteo.js';
 
 /**
- * Unified weather service with intelligent multi-API merging
- * Pulls from OpenWeatherMap, Open-Meteo, and NOAA to get the best available data.
+ * @file Unified weather service: multi-API fetch, field merge, batching, and forecast enrichment.
+ * Pulls from OpenWeatherMap, Open-Meteo, and NOAA (`noaa.js`, `openmeteo.js`, `openweathermap.js`).
  *
  * **Units (after parse):** temperature °F, wind speed mph, wind gust mph, pressure ~mb,
  * wind direction ° **meteorological** (direction the wind blows *from*, 0–360 clockwise from N).
@@ -105,7 +105,11 @@ export function mergeWeatherData(sources, mergePriority = MERGE_PRIORITY_DEFAULT
 }
 
 /**
- * Fetch current weather from multiple sources with intelligent merging
+ * Fetch current weather from multiple sources with intelligent merging.
+ * @param {number} latitude
+ * @param {number} longitude
+ * @param {{ mergePriority?: Record<string, number> }} [options] — defaults to {@link MERGE_PRIORITY_DEFAULT}
+ * @returns {Promise<object>} Merged fields plus `source` / `sources` strings
  */
 export async function fetchCurrentWeather(latitude, longitude, options = {}) {
     const mergePriority = options.mergePriority || MERGE_PRIORITY_DEFAULT;
@@ -239,7 +243,11 @@ export function enrichForecastWindGustFromSources(best, sources) {
 }
 
 /**
- * Fetch forecast data from multiple sources with intelligent merging
+ * Parallel forecast from OWM (if configured), Open-Meteo, and NOAA; keeps the response with the
+ * **most** `forecasts` periods, then enriches missing **pressure** and **windGust** from other sources.
+ * @param {number} latitude
+ * @param {number} longitude
+ * @returns {Promise<{ forecasts: object[], source: string, sources: string }>}
  */
 export async function fetchForecast(latitude, longitude) {
     const useOwm = isOpenWeatherMapConfigured();
@@ -374,7 +382,10 @@ export async function fetchBatchWeather(samplingPoints, onProgress = null, optio
 }
 
 /**
- * Batch fetch forecast for all sampling points
+ * Parallel batch of {@link fetchForecast} per point (concurrency from `CONFIG`).
+ * @param {object[]} samplingPoints — `{ id, latitude, longitude }`
+ * @param {(done: number, total: number) => void} [onProgress]
+ * @returns {Promise<{ pointId: string, success: boolean, forecasts?: object[], error?: string, ... }[]>}
  */
 export async function fetchBatchForecast(samplingPoints, onProgress = null) {
     const n = samplingPoints.length;

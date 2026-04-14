@@ -19,6 +19,21 @@
 - **IndexedDB** (`js/storage/db.js`).
 - **Quality** — ESLint, Prettier, Vitest (`tests/`), and GitHub Actions CI (lint → format check → test → build).
 
+## Documentation
+
+All project docs live under **`docs/`** (except this file).
+
+| Document                                                 | Audience                                     |
+| -------------------------------------------------------- | -------------------------------------------- |
+| [`docs/Description.md`](docs/Description.md)             | What the project is and does (overview)      |
+| [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md)             | End users — controls, modes, troubleshooting |
+| [`docs/API.md`](docs/API.md)                             | External APIs, merge behavior, trust notes   |
+| [`docs/DEPLOY.md`](docs/DEPLOY.md)                       | Static hosting and build-time env vars       |
+| [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)           | Issues, PRs, local checks                    |
+| [`docs/SECURITY.md`](docs/SECURITY.md)                   | Client-side keys, reporting concerns         |
+| [`docs/CHANGELOG.md`](docs/CHANGELOG.md)                 | Release history                              |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)           | Code layout and data flow                    |
+
 ## Project layout
 
 ```
@@ -31,6 +46,7 @@ coral-gables-weather-grid/
 ├── package.json
 ├── .env.example            # Copy → `.env` for API keys (see `.gitignore`; example file is tracked)
 ├── tests/                  # Vitest: time helpers, NOAA wind, IDW, weatherService merge
+├── docs/                   # Description, API, USER_MANUAL, DEPLOY, CONTRIBUTING, SECURITY, CHANGELOG, ARCHITECTURE
 ├── .github/workflows/ci.yml
 ├── styles/main.css
 ├── js/

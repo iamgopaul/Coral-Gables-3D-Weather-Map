@@ -2,11 +2,13 @@ import { CONFIG } from '../config.js';
 import * as DB from '../storage/db.js';
 
 /**
- * Time-based features: Historical playback, forecast mode, split-screen
+ * @file Time-based features: historical snapshots from IndexedDB, forecast time selection,
+ * `PlaybackController` for scrubbing, and helpers used by split-screen / forecast modes.
  */
 
 /**
- * Get historical data for playback
+ * Load weather snapshots from IndexedDB within the configured retention window.
+ * @returns {Promise<object[]>} Sorted by `timestamp` ascending; `[]` on failure (errors logged).
  */
 export async function getHistoricalSnapshots() {
     const endTime = Date.now();
@@ -88,7 +90,7 @@ export function interpolateSnapshots(snapshot1, snapshot2, t) {
 }
 
 /**
- * Playback controller
+ * Steps through `snapshots` on an interval for historical playback UI.
  */
 export class PlaybackController {
     constructor(snapshots, onUpdate) {
@@ -218,7 +220,11 @@ export function getTimeAgo(timestamp) {
 }
 
 /**
- * Get forecast data at specific offset
+ * For each station in `forecastResults`, pick the forecast period whose `timestamp` is **closest**
+ * to `Date.now() + hoursAhead` (used for 3h / 24h modes).
+ * @param {object[]|null} forecastResults — Batch rows from `fetchBatchForecast` (`forecasts` arrays per point)
+ * @param {number} hoursAhead — e.g. `3` or `24`
+ * @returns {object[]|null} Per-point merged period objects or `{ success: false, error }` rows
  */
 export function getForecastData(forecastResults, hoursAhead) {
     if (!forecastResults || forecastResults.length === 0) {
