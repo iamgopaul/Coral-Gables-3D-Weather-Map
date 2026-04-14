@@ -1,4 +1,5 @@
 import { CONFIG } from '../config.js';
+import { temperatureToColor } from './tempColors.js';
 
 /**
  * Generate 3D grid cells for mesh visualization
@@ -182,7 +183,7 @@ export function calculateCellColors(gridCells) {
         const temp = cell.interpolatedData?.temperature;
         
         if (temp === null || temp === undefined) {
-            return { ...cell, color: [128, 128, 128] }; // Gray for no data
+            return { ...cell, color: [52, 72, 60] };
         }
         
         return {
@@ -190,49 +191,4 @@ export function calculateCellColors(gridCells) {
             color: temperatureToColor(temp)
         };
     });
-}
-
-/**
- * Convert temperature to RGB color
- */
-function temperatureToColor(temperature) {
-    // Color gradient: Blue (cold) -> Cyan -> Green -> Yellow -> Orange -> Red (hot)
-    const gradient = CONFIG.TEMP_COLOR_GRADIENT || [
-        { temp: -10, color: [0, 0, 255] },
-        { temp: 32, color: [0, 255, 255] },
-        { temp: 60, color: [0, 255, 0] },
-        { temp: 80, color: [255, 255, 0] },
-        { temp: 100, color: [255, 165, 0] },
-        { temp: 120, color: [255, 0, 0] }
-    ];
-    
-    // Find the two gradient points to interpolate between
-    let lowerPoint = gradient[0];
-    let upperPoint = gradient[gradient.length - 1];
-    
-    for (let i = 0; i < gradient.length - 1; i++) {
-        if (temperature >= gradient[i].temp && temperature <= gradient[i + 1].temp) {
-            lowerPoint = gradient[i];
-            upperPoint = gradient[i + 1];
-            break;
-        }
-    }
-    
-    // If outside range, clamp to endpoints
-    if (temperature < gradient[0].temp) {
-        return gradient[0].color;
-    }
-    if (temperature > gradient[gradient.length - 1].temp) {
-        return gradient[gradient.length - 1].color;
-    }
-    
-    // Linear interpolation between colors
-    const tempRange = upperPoint.temp - lowerPoint.temp;
-    const t = (temperature - lowerPoint.temp) / tempRange;
-    
-    return [
-        Math.round(lowerPoint.color[0] + t * (upperPoint.color[0] - lowerPoint.color[0])),
-        Math.round(lowerPoint.color[1] + t * (upperPoint.color[1] - lowerPoint.color[1])),
-        Math.round(lowerPoint.color[2] + t * (upperPoint.color[2] - lowerPoint.color[2]))
-    ];
 }

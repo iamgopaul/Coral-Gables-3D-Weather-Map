@@ -5,34 +5,128 @@
     box-sizing: border-box;
 }
 
+/**
+ * Dark map UI + scan green (matches CONFIG TIDEfield_SCAN_COLOR ≈ rgb(34, 190, 96))
+ */
+:root {
+    --ui-accent: #22be60;
+    --ui-accent-rgb: 34, 190, 96;
+    --ui-accent-hover: #2ee077;
+    --ui-accent-press: #189952;
+    --ui-accent-glow: rgba(34, 190, 96, 0.35);
+    --ui-surface: rgba(16, 22, 30, 0.94);
+    --ui-surface-solid: #141a22;
+    --ui-surface-raised: rgba(28, 36, 48, 0.98);
+    /* Slight green tint (not cool gray/blue) so borders match scan-green chrome */
+    --ui-border: rgba(var(--ui-accent-rgb), 0.14);
+    --ui-border-strong: rgba(var(--ui-accent-rgb), 0.26);
+    --ui-text: #e8eef4;
+    --ui-text-muted: #94a3b8;
+    --ui-text-dim: #64748b;
+    /* Inset map from viewport — chrome shows behind framed scene */
+    --map-frame-inset: 14px;
+    --map-frame-radius: 12px;
+    --map-frame-border: 1px solid rgba(var(--ui-accent-rgb), 0.42);
+    --map-frame-shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.55),
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    /* Panels / floating UI: one step inside the outer frame */
+    --ui-overlay-offset: calc(var(--map-frame-inset) + 10px);
+    /* Weather Menu — left rail width (map inset uses the same values via :has()) */
+    --map-taskbar-expanded-w: min(300px, 42vw);
+    /* Minimized rail: vertical date block + time + temp + expand */
+    --map-taskbar-collapsed-w: min(76px, 19vw);
+    /* Native <select> / options follow dark UI (avoids white system styling) */
+    --ui-select-bg: #141a22;
+    --ui-select-bg-hover: #1a2330;
+    --ui-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2394a3b8' d='M6 8L0 0h12z'/%3E%3C/svg%3E");
+}
+
+#app {
+    color-scheme: dark;
+}
+
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     overflow: hidden;
+    background: #0a0d12;
 }
 
 #app {
     width: 100vw;
     height: 100vh;
     position: relative;
+    background: var(--ui-surface-solid);
 }
 
-/* 3D View Container */
-#viewDiv {
-    width: 100%;
-    height: 100%;
+/* Single view: framed map (when #viewDiv is direct child of #app) — inset for left Weather Menu */
+#app > #viewDiv {
     position: absolute;
-    top: 0;
-    left: 0;
+    top: var(--map-frame-inset);
+    left: var(--map-frame-inset);
+    right: var(--map-frame-inset);
+    bottom: var(--map-frame-inset);
+    width: auto;
+    height: auto;
     z-index: 1;
     cursor: pointer;
     outline: none;
+    border-radius: var(--map-frame-radius);
+    border: var(--map-frame-border);
+    box-shadow: var(--map-frame-shadow);
+    overflow: hidden;
+}
+
+#app:has(#mapTaskbar:not(.panel--minimized)) > #viewDiv {
+    left: calc(var(--map-frame-inset) + var(--map-taskbar-expanded-w));
+}
+
+#app:has(#mapTaskbar.panel--minimized) > #viewDiv {
+    left: calc(var(--map-frame-inset) + var(--map-taskbar-collapsed-w));
+}
+
+/* Split view: same frame around both panes */
+#splitViewContainer.split-container {
+    position: absolute;
+    top: var(--map-frame-inset);
+    left: var(--map-frame-inset);
+    right: var(--map-frame-inset);
+    bottom: var(--map-frame-inset);
+    width: auto;
+    height: auto;
+    border-radius: var(--map-frame-radius);
+    border: var(--map-frame-border);
+    box-shadow: var(--map-frame-shadow);
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.35);
+}
+
+#app:has(#mapTaskbar:not(.panel--minimized)) > #splitViewContainer.split-container {
+    left: calc(var(--map-frame-inset) + var(--map-taskbar-expanded-w));
+}
+
+#app:has(#mapTaskbar.panel--minimized) > #splitViewContainer.split-container {
+    left: calc(var(--map-frame-inset) + var(--map-taskbar-collapsed-w));
+}
+
+/* SceneView fills cell — frame is on #splitViewContainer */
+#leftView #viewDiv {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
 }
 
 /* Esri Weather widget host (see CONFIG.SCENE_ESRI_WEATHER_WIDGET) */
 .esri-weather-widget-host.esri-weather-widget-host--visible {
     position: absolute;
-    bottom: 10px;
-    right: 10px;
+    right: var(--ui-overlay-offset);
+    bottom: var(--ui-overlay-offset);
     z-index: 40;
     max-width: min(280px, 90vw);
 }
@@ -43,14 +137,14 @@ body {
     visibility: visible !important;
 }
 
-/* Scene lighting test — inside #controlPanel (not over map; avoids WebGL/legend stacking) */
+/* Scene lighting test — in Weather Menu (not over map; avoids WebGL stacking) */
 .lighting-test-hud--panel {
-    background: #0f172a;
-    color: #e2e8f0;
+    background: var(--ui-surface-raised);
+    color: var(--ui-text);
     border-radius: 6px;
     padding: 8px 10px !important;
-    border: 1px solid #334155;
-    border-left: 4px solid #f97316;
+    border: 1px solid var(--ui-border);
+    border-left: 4px solid var(--ui-accent);
     margin-bottom: 10px !important;
 }
 
@@ -82,29 +176,32 @@ body {
 .lighting-test-hud--panel .lighting-test-hud-select {
     width: 100%;
     margin-bottom: 8px;
-    padding: 6px 8px;
+    padding: 6px 2rem 6px 8px;
     font-size: 11px;
-    border-radius: 4px;
-    border: 1px solid #475569;
-    background: #1e293b;
-    color: #f1f5f9;
+    border-radius: 6px;
+    border: 1px solid var(--ui-border-strong);
+}
+
+.lighting-test-hud--panel .lighting-test-hud-select:hover {
+    border-color: rgba(var(--ui-accent-rgb), 0.5);
+}
+
+.lighting-test-hud--panel .lighting-test-hud-select:focus {
+    outline: none;
+    border-color: var(--ui-accent);
+    box-shadow: 0 0 0 2px var(--ui-accent-glow);
 }
 
 .lighting-test-hud--panel label {
     margin-top: 4px;
 }
 
-/* Split-Screen Container */
+/* Split-Screen Container — gap uses theme gutter */
 .split-container {
-    width: 100%;
-    height: 100%;
-    position: absolute;
-    top: 0;
-    left: 0;
     z-index: 5;
     display: flex;
-    gap: 2px;
-    background: #333;
+    gap: 3px;
+    box-sizing: border-box;
 }
 
 .split-view {
@@ -113,15 +210,6 @@ body {
     position: relative;
     min-width: 0;
     min-height: 0;
-}
-
-/* Main SceneView fills the left split cell when #viewDiv is reparented here */
-#leftView #viewDiv {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
 }
 
 /* Right split pane: in-flow sizing (#rightView is also .split-view); SceneView fills this box. */
@@ -133,16 +221,69 @@ body {
     min-height: 0;
 }
 
+/* Weather refresh sweep — aligned to framed map (same inset as #viewDiv / #splitViewContainer) */
+#refreshScanOverlay {
+    position: absolute;
+    top: var(--map-frame-inset);
+    left: var(--map-frame-inset);
+    right: var(--map-frame-inset);
+    bottom: var(--map-frame-inset);
+    width: auto;
+    height: auto;
+    z-index: 8;
+    pointer-events: none;
+    overflow: hidden;
+    border-radius: var(--map-frame-radius);
+    box-sizing: border-box;
+}
+
+#refreshScanOverlay::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    /* Band width — keyframes use same % so sweep fully enters/leaves the viewport */
+    width: 14%;
+    left: -14%;
+    opacity: 0;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(var(--rs-r, 34), var(--rs-g, 190), var(--rs-b, 96), 0.14),
+        rgba(var(--rs-r, 34), var(--rs-g, 190), var(--rs-b, 96), var(--rs-a, 0.32)),
+        rgba(var(--rs-r, 34), var(--rs-g, 190), var(--rs-b, 96), 0.14),
+        transparent
+    );
+    box-shadow: 0 0 48px rgba(var(--rs-r, 34), var(--rs-g, 190), var(--rs-b, 96), 0.22);
+}
+
+#refreshScanOverlay.refresh-scan-overlay--loading::before {
+    opacity: 1;
+    /* Always left → right; each iteration snaps back off the left edge */
+    animation: refreshScanSweep var(--refresh-scan-leg-dur, 6800ms) ease-in-out infinite;
+}
+
+@keyframes refreshScanSweep {
+    from {
+        left: -14%;
+    }
+    to {
+        left: 100%;
+    }
+}
+
 .split-container .split-view::before {
     content: attr(data-label);
     position: absolute;
-    top: 10px;
+    top: 12px;
     left: 50%;
     transform: translateX(-50%);
-    background: rgba(0, 0, 0, 0.7);
-    color: white;
+    background: var(--ui-surface-raised);
+    color: var(--ui-text);
     padding: 8px 16px;
-    border-radius: 4px;
+    border-radius: 6px;
+    border: 1px solid rgba(var(--ui-accent-rgb), 0.35);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
     z-index: 10;
     font-weight: bold;
     font-size: 14px;
@@ -151,14 +292,15 @@ body {
 /* Panel Styles */
 .panel {
     position: absolute;
-    background: rgba(255, 255, 255, 0.96);
-    border-radius: 6px;
+    background: var(--ui-surface);
+    color: var(--ui-text);
+    border-radius: 8px;
     padding: 12px;
-    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.3);
-    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--ui-border);
+    backdrop-filter: blur(14px);
     z-index: 10;
     font-size: 12px;
-    border: 1px solid rgba(0, 0, 0, 0.1);
+    border: 1px solid var(--ui-border);
 }
 
 /* Collapsible panel chrome */
@@ -177,7 +319,7 @@ body {
     margin: 0;
     font-size: 0.95em;
     font-weight: 600;
-    color: #2c3e50;
+    color: var(--ui-text);
     flex: 1;
     min-width: 0;
     line-height: 1.3;
@@ -188,25 +330,32 @@ body {
     width: 28px;
     height: 28px;
     padding: 0;
-    border: 1px solid #cbd5e1;
+    border: 1px solid var(--ui-border-strong);
     border-radius: 4px;
-    background: #f8fafc;
-    color: #334155;
+    background: var(--ui-surface-raised);
+    color: var(--ui-text-muted);
     font-size: 1.1rem;
     line-height: 1;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .panel-minimize-btn:hover {
-    background: #e2e8f0;
-    border-color: #94a3b8;
+    background: rgba(var(--ui-accent-rgb), 0.18);
+    border-color: rgba(var(--ui-accent-rgb), 0.55);
+    color: var(--ui-accent-hover);
+}
+
+.panel-minimize-btn:active {
+    background: rgba(var(--ui-accent-rgb), 0.32);
+    color: #fff;
 }
 
 .panel-minimize-btn:focus-visible {
-    outline: 2px solid #3498db;
+    outline: 2px solid var(--ui-accent);
     outline-offset: 2px;
 }
 
@@ -219,61 +368,269 @@ body {
     overflow: visible;
 }
 
-/* Control Panel - Compact Top Bar */
-#controlPanel {
-    top: 10px;
-    left: 10px;
-    width: 220px;
-    max-height: calc(100vh - 350px);
+/* Weather Menu — left rail, full height inside frame */
+#mapTaskbar.map-taskbar {
+    top: var(--map-frame-inset);
+    bottom: var(--map-frame-inset);
+    left: var(--map-frame-inset);
+    right: auto;
+    width: var(--map-taskbar-expanded-w);
+    padding: 0;
+    border-radius: var(--map-frame-radius) 0 0 var(--map-frame-radius);
+    border: var(--map-frame-border);
+    border-right: 1px solid rgba(var(--ui-accent-rgb), 0.28);
+    box-shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.45),
+        4px 0 24px rgba(0, 0, 0, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 10;
+    max-height: none;
+}
+
+#mapTaskbar.panel--minimized.map-taskbar {
+    width: var(--map-taskbar-collapsed-w);
+}
+
+.map-taskbar__header {
+    flex-shrink: 0;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.28);
+    border-bottom: 1px solid rgba(var(--ui-accent-rgb), 0.28);
+    flex-wrap: wrap;
+    row-gap: 6px;
+    column-gap: 10px;
+    cursor: pointer;
+    user-select: none;
+}
+
+#mapTaskbar.panel--minimized .map-taskbar__header {
+    border-bottom-color: transparent;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    padding: 6px 4px 8px;
+    gap: 6px;
+}
+
+#mapTaskbar.panel--minimized .map-taskbar__title {
+    display: none;
+}
+
+#mapTaskbar.panel--minimized .map-taskbar__header-brand {
+    align-items: center;
+    text-align: center;
+    width: 100%;
+}
+
+#mapTaskbar.panel--minimized .map-taskbar__clock {
+    align-items: center;
+}
+
+/* Expanded: one-line date; minimized: hide in favor of vertical stack */
+#mapTaskbar.panel--minimized .map-taskbar__clock-date--single {
+    display: none !important;
+}
+
+#mapTaskbar:not(.panel--minimized) .map-taskbar__clock-date-stack {
+    display: none !important;
+}
+
+.map-taskbar__clock-date-stack {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    width: 100%;
+}
+
+#mapTaskbar.panel--minimized .map-taskbar__clock-date-stack {
+    display: flex;
+}
+
+.map-taskbar__clock-stack-line {
+    display: block;
+    font-size: 8px;
+    font-weight: 700;
+    color: var(--ui-text-muted);
+    line-height: 1.15;
+    letter-spacing: 0.02em;
+    text-align: center;
+    max-width: 100%;
+}
+
+#mapTaskbar.panel--minimized .map-taskbar__clock-stack-line:first-child {
+    text-transform: uppercase;
+    font-size: 7px;
+    color: var(--ui-text-dim);
+}
+
+#mapTaskbar.panel--minimized .map-taskbar__clock-time {
+    font-size: 10px;
+    letter-spacing: -0.02em;
+}
+
+.map-taskbar__header-temp {
+    display: none;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--ui-text);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+    margin-top: 0;
+}
+
+#mapTaskbar.panel--minimized .map-taskbar__header-temp {
+    display: block;
+}
+
+.map-taskbar__header .panel-minimize-btn {
+    cursor: pointer;
+    user-select: none;
+}
+
+#mapTaskbar.panel--minimized .map-taskbar__header .panel-minimize-btn {
+    align-self: center;
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+    font-size: 1rem;
+}
+
+.map-taskbar__header-brand {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+    align-items: flex-start;
+}
+
+@media (min-width: 520px) {
+    .map-taskbar__header-brand {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px 16px;
+    }
+
+    #mapTaskbar.panel--minimized .map-taskbar__header-brand {
+        flex-direction: column;
+        flex-wrap: nowrap;
+        align-items: center;
+    }
+}
+
+.map-taskbar__clock {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    min-width: 0;
+}
+
+.map-taskbar__clock-date {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ui-text-muted);
+    letter-spacing: 0.02em;
+}
+
+.map-taskbar__clock-time {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ui-accent-hover);
+}
+
+#mapTaskbar .map-taskbar__header.panel-header {
+    margin-bottom: 0;
+}
+
+#mapTaskbar:not(.panel--minimized) .map-taskbar__header {
+    border-bottom: 2px solid rgba(var(--ui-accent-rgb), 0.45);
+}
+
+.map-taskbar__title {
+    font-size: 1.05em;
+    font-weight: 600;
+    color: var(--ui-text);
+    margin: 0;
+    flex: 0 0 auto;
+    min-width: 0;
+    line-height: 1.25;
+    letter-spacing: 0.02em;
+}
+
+.map-taskbar__body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    align-items: stretch;
+}
+
+.map-taskbar__col {
+    min-height: 0;
+    min-width: 0;
+    overflow-x: hidden;
     overflow-y: auto;
     scroll-behavior: smooth;
     -webkit-overflow-scrolling: touch;
-    z-index: 10;
+    padding: 10px 12px;
 }
 
-/* Custom scrollbar for control panel */
-#controlPanel::-webkit-scrollbar {
+.map-taskbar__col--legend {
+    flex: 0 1 auto;
+    max-height: min(38vh, 320px);
+    border-right: none;
+    border-bottom: 1px solid var(--ui-border);
+    background: rgba(0, 0, 0, 0.12);
+}
+
+.map-taskbar__col--controls {
+    flex: 1;
+    min-height: 120px;
+}
+
+.map-taskbar__legend-heading {
+    font-size: 0.9em;
+    margin: 0 0 8px 0;
+    color: var(--ui-text);
+    font-weight: 600;
+}
+
+#mapTaskbar .map-taskbar__col::-webkit-scrollbar {
     width: 6px;
 }
 
-#controlPanel::-webkit-scrollbar-track {
+#mapTaskbar .map-taskbar__col::-webkit-scrollbar-track {
     background: rgba(0, 0, 0, 0.1);
     border-radius: 3px;
 }
 
-#controlPanel::-webkit-scrollbar-thumb {
-    background: #3498db;
+#mapTaskbar .map-taskbar__col::-webkit-scrollbar-thumb {
+    background: rgba(var(--ui-accent-rgb), 0.45);
     border-radius: 3px;
 }
 
-#controlPanel::-webkit-scrollbar-thumb:hover {
-    background: #2980b9;
-}
-
-/* Custom scrollbar for legend panel */
-#legendPanel::-webkit-scrollbar {
-    width: 6px;
-}
-
-#legendPanel::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.1);
-    border-radius: 3px;
-}
-
-#legendPanel::-webkit-scrollbar-thumb {
-    background: #3498db;
-    border-radius: 3px;
-}
-
-#legendPanel::-webkit-scrollbar-thumb:hover {
-    background: #2980b9;
+#mapTaskbar .map-taskbar__col::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--ui-accent-rgb), 0.75);
 }
 
 /* Live Coral Gables readout (NWS-prioritized merge) */
+.map-taskbar__col--legend .coral-gables-live {
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+}
+
 .coral-gables-live {
     margin-bottom: 14px;
     padding-bottom: 12px;
-    border-bottom: 1px solid #e2e8f0;
+    border-bottom: 1px solid var(--ui-border);
 }
 
 .coral-gables-live h4 {
@@ -281,57 +638,85 @@ body {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: #64748b;
+    color: var(--ui-text-dim);
     margin: 0 0 6px 0;
 }
 
 .cg-live-temp {
     font-size: 1.75rem;
     font-weight: 700;
-    color: #0f172a;
+    color: var(--ui-text);
     line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+}
+
+.cg-live-wind {
+    margin: 6px 0 2px 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ui-accent-hover);
+    line-height: 1.35;
     font-variant-numeric: tabular-nums;
 }
 
 .cg-live-condition {
     margin: 4px 0 2px 0;
     font-size: 12px;
-    color: #334155;
+    color: var(--ui-text-muted);
     line-height: 1.35;
 }
 
 .cg-live-source {
     display: block;
-    color: #94a3b8;
+    color: var(--ui-text-dim);
     font-size: 9px;
     line-height: 1.3;
 }
 
-#controlPanel .panel-header h2 {
-    font-size: 1.1em;
-    margin: 0;
-    flex: 1;
-    min-width: 0;
-    color: #2c3e50;
+#mapTaskbar .map-taskbar__header .map-taskbar__title {
     border-bottom: none;
     padding-bottom: 0;
-    line-height: 1.25;
-}
-
-#controlPanel:not(.panel--minimized) .panel-header {
-    border-bottom: 2px solid #3498db;
-    padding-bottom: 6px;
 }
 
 .control-group {
     margin-bottom: 12px;
 }
 
+.control-group--map-style {
+    background: rgba(var(--ui-accent-rgb), 0.06);
+    border: 1px solid rgba(var(--ui-accent-rgb), 0.22);
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+
+.control-group--tip {
+    background: rgba(var(--ui-accent-rgb), 0.08) !important;
+    border: 1px solid rgba(var(--ui-accent-rgb), 0.2) !important;
+    padding: 6px;
+    border-radius: 6px;
+    margin-bottom: 10px;
+}
+
+.control-group--tip small {
+    display: block;
+    color: var(--ui-text-muted) !important;
+    line-height: 1.35;
+    font-size: 10px;
+}
+
+.control-hint {
+    display: block;
+    margin-top: 6px;
+    color: var(--ui-text-dim);
+    font-size: 10px;
+    line-height: 1.35;
+}
+
 .control-group label {
     display: block;
     font-weight: 600;
     margin-bottom: 4px;
-    color: #34495e;
+    color: var(--ui-text-muted);
     font-size: 11px;
 }
 
@@ -339,22 +724,74 @@ body {
 .control-group button {
     width: 100%;
     padding: 6px 8px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
+    border: 1px solid var(--ui-border-strong);
+    border-radius: 6px;
     font-size: 11px;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+
+/* Dark selects — explicit bg + no native chrome (often renders white) */
+#app select,
+select.lighting-test-hud-select {
+    background-color: var(--ui-select-bg);
+    color: var(--ui-text);
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: var(--ui-select-chevron);
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 2rem;
+}
+
+#app select:hover,
+select.lighting-test-hud-select:hover {
+    background-color: var(--ui-select-bg-hover);
+    background-image: var(--ui-select-chevron);
+}
+
+#app select option,
+select.lighting-test-hud-select option {
+    background-color: var(--ui-select-bg);
+    color: var(--ui-text);
+}
+
+.control-group select:hover {
+    border-color: rgba(var(--ui-accent-rgb), 0.5);
+}
+
+.control-group select:focus {
+    outline: none;
+    border-color: var(--ui-accent);
+    box-shadow: 0 0 0 2px var(--ui-accent-glow);
+    background-color: var(--ui-select-bg);
+    background-image: var(--ui-select-chevron);
 }
 
 .control-group button {
-    background: #3498db;
-    color: white;
-    border: none;
+    background-color: rgba(var(--ui-accent-rgb), 0.2);
+    color: var(--ui-text);
+    border: 1px solid rgba(var(--ui-accent-rgb), 0.45);
     font-weight: 600;
 }
 
 .control-group button:hover {
-    background: #2980b9;
+    background-color: rgba(var(--ui-accent-rgb), 0.38);
+    border-color: var(--ui-accent);
+    color: #fff;
+}
+
+.control-group button:active {
+    background-color: var(--ui-accent-press);
+    border-color: var(--ui-accent-press);
+    color: #fff;
+}
+
+.control-group button:focus-visible,
+.control-group select:focus-visible {
+    outline: 2px solid var(--ui-accent);
+    outline-offset: 2px;
 }
 
 /* Checkbox Group */
@@ -370,6 +807,7 @@ body {
     font-weight: 400;
     cursor: pointer;
     font-size: 11px;
+    color: var(--ui-text-muted);
 }
 
 .checkbox-group input[type="checkbox"] {
@@ -377,20 +815,22 @@ body {
     width: 14px;
     height: 14px;
     cursor: pointer;
+    accent-color: var(--ui-accent);
 }
 
 /* Playback Controls */
 #playbackControls {
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--ui-border);
     padding: 15px;
     border-radius: 6px;
-    background: #f9f9f9;
+    background: rgba(0, 0, 0, 0.2);
 }
 
 #timelineSlider {
     width: 100%;
     margin: 10px 0;
     cursor: pointer;
+    accent-color: var(--ui-accent);
 }
 
 .playback-buttons {
@@ -409,56 +849,58 @@ body {
     margin-top: 10px;
     text-align: center;
     font-weight: 600;
-    color: #3498db;
+    color: var(--ui-accent-hover);
 }
 
 /* Data Source Status */
 #dataSource {
     padding: 6px;
-    background: #ecf0f1;
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid var(--ui-border);
     border-radius: 4px;
     text-align: center;
     font-size: 10px;
+    color: var(--ui-text-muted);
 }
 
 #sourceStatus {
     font-weight: 600;
-    color: #27ae60;
+    color: var(--ui-accent-hover);
 }
 
 #lastUpdate {
     margin-top: 4px;
     text-align: center;
     font-size: 10px;
-    color: #7f8c8d;
+    color: var(--ui-text-dim);
 }
 
 .next-update {
     margin-top: 2px;
     text-align: center;
     font-size: 9px;
-    color: #95a5a6;
+    color: var(--ui-text-dim);
 }
 
 .timeline-info {
     margin-top: 4px;
     text-align: center;
-    color: #7f8c8d;
+    color: var(--ui-text-dim);
     font-size: 9px;
 }
 
 .data-quality {
     margin-top: 3px;
     text-align: center;
-    color: #7f8c8d;
+    color: var(--ui-text-dim);
     font-size: 9px;
 }
 
 #splitScreenControls {
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--ui-border);
     padding: 10px;
     border-radius: 4px;
-    background: #f9f9f9;
+    background: rgba(0, 0, 0, 0.2);
 }
 
 #splitScreenControls button {
@@ -466,59 +908,26 @@ body {
     font-size: 10px;
 }
 
-/* Legend Panel - Absolutely Positioned Bottom Left */
-#legendPanel {
-    position: absolute !important;
-    bottom: 10px !important;
-    left: 10px !important;
-    width: 200px !important;
-    z-index: 10 !important;
-    padding: 10px !important;
-    margin: 0 !important;
-    max-height: 280px;
-    overflow-y: auto;
-    scroll-behavior: smooth;
-    -webkit-overflow-scrolling: touch;
-    display: block !important;
-    visibility: visible !important;
-}
-
-#legendPanel.panel--minimized {
-    max-height: none;
-    overflow: visible;
-}
-
-#legendPanel:not(.panel--minimized) .panel-header--legend {
-    margin-bottom: 8px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid #e2e8f0;
-}
-
-#legendPanel h3 {
-    font-size: 0.9em;
-    margin-bottom: 8px;
-    color: #2c3e50;
-    font-weight: 600;
-}
-
+/* Fallback until JS runs `syncTempLegendGradient()` — matches TEMP_COLOR_GRADIENT in config */
 .gradient-bar {
     height: 24px;
-    background: linear-gradient(to right, 
-        #0000ff 0%,
-        #00ffff 25%,
-        #00ff00 50%,
-        #ffff00 75%,
-        #ff0000 100%
+    background: linear-gradient(
+        to right,
+        rgb(24, 56, 46) 0%,
+        rgb(22, 112, 88) 30%,
+        rgb(46, 188, 108) 64%,
+        rgb(245, 148, 72) 100%
     );
     border-radius: 4px;
     margin-bottom: 8px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .scale-labels {
     display: flex;
     justify-content: space-between;
     font-weight: 600;
-    color: #34495e;
+    color: var(--ui-text-muted);
     font-size: 10px;
     margin-top: 4px;
 }
@@ -526,83 +935,133 @@ body {
 .elevation-scale {
     margin-top: 8px;
     padding-top: 8px;
-    border-top: 1px solid #e0e0e0;
+    border-top: 1px solid var(--ui-border);
 }
 
 .elevation-scale p {
     font-weight: 600;
     margin-bottom: 2px;
     font-size: 10px;
+    color: var(--ui-text-muted);
 }
 
 .elevation-scale small {
-    color: #7f8c8d;
+    color: var(--ui-text-dim);
     font-size: 9px;
 }
 
 .mode-display {
     margin-top: 8px;
     padding-top: 8px;
-    border-top: 1px solid #e0e0e0;
+    border-top: 1px solid var(--ui-border);
     text-align: center;
     font-size: 10px;
+    color: var(--ui-text-muted);
 }
 
 .mode-display span {
-    color: #3498db;
+    color: var(--ui-accent-hover);
     font-weight: 600;
 }
 
-/* Alert Banner - Top Right */
-.alert-banner {
+/* Weather alert toasts — top center of framed map (offset for left Weather Menu) */
+.alert-toast-host {
     position: absolute;
-    top: 10px;
-    right: 10px;
-    max-width: 280px;
-    background: rgba(220, 53, 69, 0.96);
-    color: white;
-    padding: 10px 30px 10px 12px;
-    border-radius: 6px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    left: calc(50% + var(--map-taskbar-expanded-w) / 2);
+    transform: translateX(-50%);
+    top: calc(var(--map-frame-inset) + 10px);
     z-index: 500;
-    font-size: 11px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    width: min(380px, calc(100vw - 2 * var(--map-frame-inset) - var(--map-taskbar-expanded-w) - 20px));
+    pointer-events: none;
 }
 
-@keyframes slideIn {
+#app:has(#mapTaskbar.panel--minimized) .alert-toast-host {
+    left: calc(50% + var(--map-taskbar-collapsed-w) / 2);
+    width: min(380px, calc(100vw - 2 * var(--map-frame-inset) - var(--map-taskbar-collapsed-w) - 20px));
+}
+
+.alert-toast {
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 10px 8px 12px;
+    border-radius: 8px;
+    font-size: 11px;
+    line-height: 1.35;
+    font-weight: 600;
+    color: #f8fafc;
+    background: rgba(185, 28, 28, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow:
+        0 4px 20px rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(0, 0, 0, 0.25);
+    animation: alertToastIn 0.32s ease-out both;
+    transition:
+        opacity 0.42s ease,
+        transform 0.42s ease;
+}
+
+@keyframes alertToastIn {
     from {
         opacity: 0;
-        transform: translateX(20px);
+        transform: translateY(-10px);
     }
     to {
         opacity: 1;
-        transform: translateX(0);
+        transform: translateY(0);
     }
 }
 
-.alert-banner.warning {
-    background: #f39c12;
+.alert-toast--warning {
+    background: rgba(217, 119, 6, 0.95);
+    color: #fffbeb;
 }
 
-.alert-banner.advisory {
-    background: #f1c40f;
-    color: #2c3e50;
+.alert-toast--advisory {
+    background: rgba(202, 138, 4, 0.95);
+    color: #1c1917;
+    border-color: rgba(0, 0, 0, 0.12);
 }
 
-#alertContent {
-    font-weight: 600;
+.alert-toast--leaving {
+    opacity: 0;
+    transform: translateY(-8px);
+    pointer-events: none;
 }
 
-#dismissAlert {
-    position: absolute;
-    top: 10px;
-    right: 15px;
-    background: none;
+.alert-toast__text {
+    flex: 1;
+    min-width: 0;
+}
+
+.alert-toast__dismiss {
+    flex-shrink: 0;
+    margin: -2px -4px -2px 0;
+    padding: 4px 8px;
     border: none;
-    color: white;
-    font-size: 20px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.2);
+    color: inherit;
+    font-size: 14px;
+    line-height: 1;
     cursor: pointer;
-    padding: 0;
-    width: auto;
+    opacity: 0.85;
+    transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.alert-toast__dismiss:hover {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.35);
+}
+
+.alert-toast__dismiss:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.6);
+    outline-offset: 1px;
 }
 
 /* Loading Indicator */
@@ -611,20 +1070,26 @@ body {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: rgba(255, 255, 255, 0.96);
+    background: var(--ui-surface);
+    color: var(--ui-text);
     padding: 20px;
-    border-radius: 6px;
+    border-radius: 8px;
     text-align: center;
     z-index: 1000;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--ui-border);
     font-size: 12px;
+    border: 1px solid var(--ui-border);
+}
+
+#loadingMessage {
+    color: var(--ui-text-muted);
 }
 
 .spinner {
     width: 40px;
     height: 40px;
-    border: 3px solid #f3f3f3;
-    border-top: 3px solid #3498db;
+    border: 3px solid rgba(255, 255, 255, 0.12);
+    border-top: 3px solid var(--ui-accent);
     border-radius: 50%;
     animation: spin 1s linear infinite;
     margin: 0 auto 10px;
@@ -648,6 +1113,32 @@ body {
 .esri-popup__main-container {
     z-index: 10000 !important;
     max-width: 300px !important;
+    background: var(--ui-surface) !important;
+    color: var(--ui-text) !important;
+    border: 1px solid var(--ui-border) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45) !important;
+}
+
+.esri-popup__header-title,
+.esri-popup__header {
+    color: var(--ui-text) !important;
+}
+
+.esri-popup__header-buttons .esri-widget__button,
+.esri-popup__footer .esri-widget__button {
+    background: transparent !important;
+    color: var(--ui-text-muted) !important;
+}
+
+.esri-popup__header-buttons .esri-widget__button:hover,
+.esri-popup__footer .esri-widget__button:hover {
+    background: rgba(var(--ui-accent-rgb), 0.2) !important;
+    color: var(--ui-accent-hover) !important;
+}
+
+.esri-popup__content {
+    color: var(--ui-text-muted) !important;
 }
 
 .esri-popup--is-docked {
@@ -665,107 +1156,110 @@ body {
     margin: 8px !important;
 }
 
+/* Map chrome: zoom, compass, home, navigation — dark + scan green hover / press */
+.esri-ui .esri-widget,
+.esri-ui .esri-widget--panel,
+.esri-ui .esri-widget--button,
+.esri-ui .esri-widget.esri-compass,
+.esri-ui .esri-widget.esri-zoom,
+.esri-ui .esri-widget.esri-home,
+.esri-ui .esri-widget.esri-navigation-toggle {
+    background-color: var(--ui-surface-raised) !important;
+    color: var(--ui-text) !important;
+    border: 1px solid var(--ui-border) !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
+}
+
+.esri-ui .esri-widget--button:hover,
+.esri-ui .esri-widget.esri-compass:hover,
+.esri-ui .esri-widget.esri-zoom .esri-widget--button:hover,
+.esri-ui .esri-widget.esri-home:hover,
+.esri-ui .esri-widget.esri-navigation-toggle:hover,
+.esri-ui .esri-widget__button:hover {
+    background-color: rgba(var(--ui-accent-rgb), 0.28) !important;
+    color: #fff !important;
+    border-color: rgba(var(--ui-accent-rgb), 0.55) !important;
+}
+
+.esri-ui .esri-widget--button:active,
+.esri-ui .esri-widget.esri-compass:active,
+.esri-ui .esri-widget.esri-zoom .esri-widget--button:active,
+.esri-ui .esri-widget.esri-home:active,
+.esri-ui .esri-widget.esri-navigation-toggle:active,
+.esri-ui .esri-widget__button:active {
+    background-color: rgba(var(--ui-accent-rgb), 0.48) !important;
+    border-color: var(--ui-accent) !important;
+}
+
+.esri-ui .esri-icon,
+.esri-ui .esri-widget__button .esri-icon {
+    color: inherit !important;
+}
+
 .esri-zoom {
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3) !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
 }
 
 .esri-compass {
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3) !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
 }
 
 .esri-navigation-toggle {
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3) !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
 }
 
 .esri-home {
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3) !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
 }
 
-/* Debug Console - Bottom Right */
-.debug-console {
-    position: absolute;
-    bottom: 10px;
-    right: 10px;
-    width: 350px;
-    max-height: 200px;
-    background: rgba(0, 0, 0, 0.9);
-    color: #ffffff;
-    border: 1px solid #00d4ff;
-    border-radius: 4px;
-    font-family: 'Courier New', monospace;
-    font-size: 10px;
-    z-index: 15;
-    overflow: hidden;
+/* Calcite-based widgets (ArcGIS 4.x) */
+.esri-ui calcite-action,
+.esri-ui calcite-button {
+    --calcite-ui-foreground-1: var(--ui-text);
+    --calcite-ui-background: var(--ui-surface-solid);
+    --calcite-ui-border-1: var(--ui-border-strong);
 }
 
-.debug-header {
-    background: rgba(0, 150, 200, 0.2);
-    padding: 6px 10px;
-    border-bottom: 1px solid #00d4ff;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 10px;
+.esri-ui calcite-action:hover,
+.esri-ui calcite-button:hover {
+    --calcite-ui-foreground-1: #fff;
+    --calcite-ui-brand: var(--ui-accent);
+    --calcite-ui-border-1: var(--ui-accent);
 }
 
-.debug-header strong {
-    color: #00d4ff;
+.esri-ui calcite-action:active,
+.esri-ui calcite-button:active {
+    --calcite-ui-brand: var(--ui-accent-press);
 }
 
-.debug-header small {
-    color: #88ccff;
-}
-
-#debugOutput {
-    padding: 10px;
-    max-height: 160px;
-    overflow-y: auto;
-    overflow-x: hidden;
-    color: #ffffff;
-    line-height: 1.4;
-    word-wrap: break-word;
-}
-
-#debugOutput::-webkit-scrollbar {
-    width: 8px;
-}
-
-#debugOutput::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.5);
-}
-
-#debugOutput::-webkit-scrollbar-thumb {
-    background: #00d4ff;
-    border-radius: 4px;
+/* Attribution */
+.esri-view-root .esri-attribution,
+.esri-ui .esri-attribution {
+    background: rgba(16, 22, 30, 0.88) !important;
+    color: var(--ui-text-muted) !important;
 }
 
 /* Responsive Design */
 @media (max-width: 768px) {
-    #controlPanel {
-        width: calc(50% - 15px);
-        max-height: 50vh;
-        left: 10px;
+    :root {
+        --map-frame-inset: 10px;
+        --map-taskbar-expanded-w: min(260px, 78vw);
+    }
+
+    .map-taskbar__col--legend {
+        max-height: 36vh;
+    }
+
+    .map-taskbar__col--controls {
         font-size: 10px;
     }
-    
-    #legendPanel {
-        width: calc(50% - 15px);
-        left: auto;
-        right: 10px;
-        bottom: 10px;
+
+    .alert-toast-host {
+        width: min(300px, calc(100vw - 2 * var(--map-frame-inset) - var(--map-taskbar-expanded-w) - 12px));
     }
-    
-    .alert-banner {
-        max-width: calc(100% - 20px);
-        right: 10px;
-        top: 10px;
+
+    .alert-toast {
         font-size: 10px;
-    }
-    
-    .debug-console {
-        width: calc(100% - 20px);
-        left: 10px;
-        bottom: 10px;
-        max-height: 150px;
+        padding: 7px 9px;
     }
 }

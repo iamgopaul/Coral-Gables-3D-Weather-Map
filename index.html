@@ -32,7 +32,7 @@
     <link rel="dns-prefetch" href="https://js.arcgis.com">
     
     <!-- ArcGIS API for JavaScript 4.x -->
-    <link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/light/main.css">
+    <link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/dark/main.css">
     <link rel="stylesheet" href="/styles/main.css">
     <!-- ArcGIS must load before the app module (Vite may hoist the module into head). -->
     <script src="https://js.arcgis.com/4.29/"></script>
@@ -48,18 +48,54 @@
             <div id="leftView" class="split-view"></div>
             <div id="rightView" class="split-view"></div>
         </div>
+
+        <!-- Slow looping CSS sweep while weather fetch runs (all grid looks, including Tidefield) -->
+        <div id="refreshScanOverlay" class="refresh-scan-overlay hidden" aria-hidden="true"></div>
         
-        <!-- Control Panel -->
-        <div id="controlPanel" class="panel panel--collapsible">
-            <div class="panel-header">
-                <h2 id="controlPanelTitle">🌡️ Controls</h2>
-                <button type="button" class="panel-minimize-btn" id="controlPanelMinBtn" aria-expanded="true" aria-controls="controlPanelBody" title="Hide controls">−</button>
+        <!-- Weather Menu: left rail, legend + controls -->
+        <div id="mapTaskbar" class="map-taskbar panel panel--collapsible" aria-expanded="true">
+            <div class="map-taskbar__header panel-header" title="Click to minimize or expand the Weather Menu">
+                <div class="map-taskbar__header-brand">
+                    <h2 id="mapTaskbarTitle" class="map-taskbar__title">Weather Menu</h2>
+                    <div class="map-taskbar__clock" id="weatherMenuClock" aria-live="polite" aria-atomic="true">
+                        <span id="weatherMenuClockDate" class="map-taskbar__clock-date map-taskbar__clock-date--single"></span>
+                        <div id="weatherMenuClockDateStack" class="map-taskbar__clock-date-stack">
+                            <span id="weatherMenuClockDow" class="map-taskbar__clock-stack-line"></span>
+                            <span id="weatherMenuClockMd" class="map-taskbar__clock-stack-line"></span>
+                            <span id="weatherMenuClockYr" class="map-taskbar__clock-stack-line"></span>
+                        </div>
+                        <span id="weatherMenuClockTime" class="map-taskbar__clock-time"></span>
+                    </div>
+                    <div id="cgLiveTempHeader" class="map-taskbar__header-temp">--°F</div>
+                </div>
+                <button type="button" class="panel-minimize-btn" id="mapTaskbarMinBtn" aria-expanded="true" aria-controls="mapTaskbarBody" title="Hide Weather Menu">−</button>
             </div>
-            <div id="controlPanelBody" class="panel-body">
-            <div class="control-group" style="background: #e3f2fd; padding: 6px; border-radius: 4px; margin-bottom: 10px;">
-                <small style="color: #1976d2; line-height: 1.3; font-size: 10px;">
-                    💡 Click grid cells for details
-                </small>
+            <div id="mapTaskbarBody" class="map-taskbar__body panel-body">
+            <div class="map-taskbar__col map-taskbar__col--legend">
+            <div id="coralGablesLive" class="coral-gables-live" aria-label="Current conditions at Coral Gables">
+                <h4>Coral Gables (live)</h4>
+                <div id="cgLiveTemp" class="cg-live-temp">--°F</div>
+                <p id="cgLiveWind" class="cg-live-wind">Wind: —</p>
+                <p id="cgLiveCondition" class="cg-live-condition">—</p>
+                <small id="cgLiveSource" class="cg-live-source"></small>
+            </div>
+            <h3 class="map-taskbar__legend-heading">Temperature Scale</h3>
+            <div id="tempGradient" class="gradient-bar"></div>
+            <div class="scale-labels">
+                <span id="minTemp">--°F</span>
+                <span id="maxTemp">--°F</span>
+            </div>
+            <div class="elevation-scale">
+                <p>Height = Temperature</p>
+                <small>Warmer areas rise higher</small>
+            </div>
+            <div class="mode-display">
+                <strong>Mode: <span id="currentModeText">Current</span></strong>
+            </div>
+            </div>
+            <div class="map-taskbar__col map-taskbar__col--controls">
+            <div class="control-group control-group--tip">
+                <small>💡 Click grid cells for details</small>
             </div>
             
             <!-- Scene atmosphere: time-of-day + rain (Esri sun + weather) -->
@@ -82,6 +118,17 @@
                 </select>
                 <div id="lightingHudSimTime" class="lighting-test-hud-time">—</div>
                 <div id="lightingHudOffset" class="lighting-test-hud-offset"></div>
+            </div>
+            
+            <!-- Grid Look preset (default: Gulf Glass) -->
+            <div class="control-group control-group--map-style">
+                <label for="mapVisualStyleSelect">Grid Look</label>
+                <select id="mapVisualStyleSelect" title="Gulf Glass = daily driver; Basic Grid = legend temp colors; Tidefield = ripples + membrane + tethers">
+                    <option value="gulf-glass">Gulf Glass</option>
+                    <option value="basic-grid">Basic Grid</option>
+                    <option value="tidefield-membrane">Tidefield Membrane</option>
+                </select>
+                <small class="control-hint">All grid looks use the same four-stop temperature scale (legend). Gulf / Basic / Tidefield differ in mesh style and Tidefield adds the membrane layer.</small>
             </div>
             
             <!-- Mode Selector -->
@@ -140,7 +187,7 @@
             <div class="control-group">
                 <button id="refreshBtn">🔄 Refresh Now</button>
                 <div id="lastUpdate">Last update: --:--</div>
-                <div id="nextUpdate" class="next-update">Next: <span id="nextUpdateTime">--</span></div>
+                <div id="nextUpdate" class="next-update"><span id="refreshIntervalNote"></span>Next: <span id="nextUpdateTime">--</span></div>
             </div>
             
             <!-- Layer Toggles -->
@@ -148,15 +195,10 @@
                 <label>Display Layers:</label>
                 <div class="checkbox-group">
                     <label><input type="checkbox" id="toggleGrid" checked> Grid Mesh</label>
-                    <label><input type="checkbox" id="togglePoints" checked> Sample Points</label>
+                    <label><input type="checkbox" id="togglePoints"> Weather Points</label>
                     <label><input type="checkbox" id="toggleWind"> Wind Vectors</label>
                     <label><input type="checkbox" id="toggleAlerts" checked> Weather Alerts</label>
                 </div>
-            </div>
-            
-            <!-- Animation Toggle -->
-            <div class="control-group">
-                <label><input type="checkbox" id="toggleAnimation" checked> Smooth Transitions</label>
             </div>
             
             <!-- Data Source Status -->
@@ -167,42 +209,11 @@
                 </div>
             </div>
             </div>
-        </div>
-        
-        <!-- Legend Panel -->
-        <div id="legendPanel" class="panel panel--collapsible">
-            <div class="panel-header panel-header--legend">
-                <h3 class="panel-header-title" id="legendPanelTitle">Temp &amp; legend</h3>
-                <button type="button" class="panel-minimize-btn" id="legendPanelMinBtn" aria-expanded="true" aria-controls="legendPanelBody" title="Hide legend">−</button>
-            </div>
-            <div id="legendPanelBody" class="panel-body">
-            <div id="coralGablesLive" class="coral-gables-live" aria-label="Current conditions at Coral Gables">
-                <h4>Coral Gables (live)</h4>
-                <div id="cgLiveTemp" class="cg-live-temp">--°F</div>
-                <p id="cgLiveCondition" class="cg-live-condition">—</p>
-                <small id="cgLiveSource" class="cg-live-source"></small>
-            </div>
-            <h3>Temperature Scale</h3>
-            <div id="tempGradient" class="gradient-bar"></div>
-            <div class="scale-labels">
-                <span id="minTemp">--°F</span>
-                <span id="maxTemp">--°F</span>
-            </div>
-            <div class="elevation-scale">
-                <p>Height = Temperature</p>
-                <small>Warmer areas rise higher</small>
-            </div>
-            <div class="mode-display">
-                <strong>Mode: <span id="currentModeText">Current</span></strong>
-            </div>
             </div>
         </div>
         
-        <!-- Alert Banner -->
-        <div id="alertBanner" class="alert-banner hidden">
-            <div id="alertContent"></div>
-            <button id="dismissAlert">✕</button>
-        </div>
+        <!-- Weather alert toasts (top center of map; see main.js) -->
+        <div id="alertToastHost" class="alert-toast-host" aria-live="polite"></div>
         
         <!-- Loading Indicator -->
         <div id="loadingIndicator" class="hidden">
@@ -212,15 +223,6 @@
         
         <!-- Headless Esri Weather widget mount (styled via #app-critical-shell until JS adds classes) -->
         <div id="esriWeatherWidgetHost" aria-hidden="true"></div>
-
-        <!-- Debug Console (Press 'D' to toggle) -->
-        <div id="debugConsole" class="debug-console">
-            <div class="debug-header">
-                <strong>Debug Console</strong>
-                <small>(Press 'D' to toggle)</small>
-            </div>
-            <div id="debugOutput"></div>
-        </div>
     </div>
 </body>
 </html>

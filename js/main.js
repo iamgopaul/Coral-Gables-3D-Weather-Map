@@ -3,8 +3,26 @@ import { generateSamplingPoints } from './samplingPoints.js';
 import * as WeatherService from './api/weatherService.js';
 import * as DB from './storage/db.js';
 import { generateGridCells } from './utils/gridGenerator.js';
+import {
+    classicReliefTempRgb,
+    temperatureToColor,
+    tempGradientCssLinear
+} from './utils/tempColors.js';
 import { interpolateGrid, interpolate } from './utils/interpolation.js';
 import * as TimeFeatures from './features/timeFeatures.js';
+import {
+    setTidefieldModules,
+    registerTidefieldContext,
+    unregisterTidefieldContext,
+    afterGridRebuild,
+    triggerMembranePulse
+} from './features/tidefieldMembrane.js';
+import {
+    getMapVisualStyle,
+    setMapVisualStyle,
+    isTidefieldMembraneActive,
+    isBasicGridActive
+} from './features/mapVisualStyle.js';
 
 /**
  * ENHANCED Main Application with Time-Based Features
@@ -26,9 +44,13 @@ const state = {
     rightSceneView: null,
     layers: {
         grid: null,
+        membrane: null,
+        tether: null,
         points: null,
         wind: null,
         splitGrid: null,
+        splitMembrane: null,
+        splitTether: null,
         splitPoints: null,
         splitWind: null
     },
@@ -37,7 +59,8 @@ const state = {
         alertRefresh: null,
         countdownTimer: null,
         sceneLighting: null,
-        lightingHudClock: null
+        lightingHudClock: null,
+        weatherMenuClock: null
     },
     playbackController: null,
     isShowingGrid: false,
@@ -80,11 +103,26 @@ const state = {
     /** Handles to remove when tearing down the right SceneView */
     splitRightInternalWatchHandles: [],
     /** Esri constructors for split pane — set after initArcGIS `require` (avoids nested `require` from ES modules). */
-    esriSplit: null
+    esriSplit: null,
+    /** Layer toggle: show NWS alert toasts over the map */
+    alertsUiEnabled: true,
+    /** WatchHandle from `wireSceneCameraDebugToTerminal` — removed on teardown if we add cleanup */
+    cameraDebugWatchHandle: null
+};
+
+/** Dedupe alert toasts per session / user dismiss */
+const alertToastRuntime = {
+    shownIds: new Set(),
+    dismissedIds: new Set(),
+    autoHideTimers: new Map()
 };
 
 // Make state accessible for debugging
 window.debugState = state;
+
+/** `performance.now()` when the current CSS refresh sweep animation started (one iteration = one leg). */
+let refreshScanAnimStartMs = 0;
+let refreshScanStopTimerId = null;
 
 /**
  * Initialize the application
@@ -114,11 +152,6 @@ async function init() {
             setupLightingTestHud();
         }
 
-        // Hide full-screen loader before weather/history — otherwise the map and control panel
-        // (including Scene sun time) stay covered until the slow API calls finish.
-        // Keep loader visible until first weather refresh completes so opening view shows
-        // live API-driven sky/weather together with the grid (see refreshWeatherData).
-
         // Wait a brief moment for layers to be fully ready
         await new Promise(resolve => setTimeout(resolve, 100));
         
@@ -141,8 +174,9 @@ async function init() {
             debugLog('⚠ No historical data yet (this is normal on first run)');
         }
         
-        // Fetch initial weather data
+        // Fetch initial weather data — no fullscreen weather loader; CSS sweep is the load cue (same as periodic refresh)
         try {
+            showLoading(false);
             await refreshWeatherData();
             debugLog('✓ Initial weather data loaded');
         } catch (refreshErr) {
@@ -195,15 +229,18 @@ function showImmediateGrid() {
                 
                 debugLog('🎨 Adding grid cells...');
                 state.layers.grid.removeAll();
-                
-                const colors = [
-                    [0, 0, 255],     // Blue
-                    [0, 255, 255],   // Cyan
-                    [0, 255, 0],     // Green
-                    [255, 255, 0],   // Yellow
-                    [255, 128, 0],   // Orange
-                    [255, 0, 0]      // Red
-                ];
+
+                let minT = Infinity;
+                let maxT = -Infinity;
+                for (const c of state.gridCells) {
+                    const t = c.interpolatedData?.temperature;
+                    if (t != null && !Number.isNaN(t)) {
+                        minT = Math.min(minT, t);
+                        maxT = Math.max(maxT, t);
+                    }
+                }
+                const range = maxT > minT ? maxT - minT : 0;
+                const hasFrameTemps = range > 0;
                 
                 let added = 0;
                 let failed = 0;
@@ -213,8 +250,13 @@ function showImmediateGrid() {
                         const row = cell.row || 0;
                         const col = cell.col || 0;
                         const elevation = (row * 100) + (col * 80) + 500; // Much higher!
-                        const colorIndex = (row + col) % colors.length;
-                        const color = colors[colorIndex];
+                        const tCell = cell.interpolatedData?.temperature;
+                        const color =
+                            hasFrameTemps && tCell != null && !Number.isNaN(tCell)
+                                ? classicReliefTempRgb(tCell, minT, maxT, range)
+                                : temperatureToColor(
+                                      tCell != null && !Number.isNaN(tCell) ? tCell : 72
+                                  );
                         
                         const polygon = new Polygon({
                             rings: [[
@@ -232,7 +274,7 @@ function showImmediateGrid() {
                             symbol: new SimpleFillSymbol({
                                 color: [...color, 0], // 100% transparent
                                 outline: {
-                                    color: [...color, 255],
+                                    color: [...color, CONFIG.BASIC_GRID_OUTLINE_ALPHA ?? 118],
                                     width: 2
                                 }
                             }),
@@ -258,6 +300,9 @@ function showImmediateGrid() {
                 
                 debugLog(`✓ GRID VISIBLE: ${added} cells added` + (failed > 0 ? `, ${failed} failed` : ''));
                 console.log(`%c🎨 GRID IS NOW VISIBLE! ${added} colorful cells added`, 'color: green; font-weight: bold; font-size: 14px');
+                if (isTidefieldMembraneActive()) {
+                    afterGridRebuild('main', state.samplingPoints);
+                }
                 state.isShowingGrid = false;
                 
             } catch (err) {
@@ -755,7 +800,12 @@ async function initArcGIS() {
             'esri/widgets/Home',
             'esri/geometry/Extent',
             'esri/core/reactiveUtils',
-            'esri/widgets/Weather'
+            'esri/widgets/Weather',
+            'esri/Graphic',
+            'esri/geometry/Polygon',
+            'esri/geometry/Polyline',
+            'esri/symbols/SimpleFillSymbol',
+            'esri/symbols/SimpleLineSymbol'
         ], (
             WebScene,
             Environment,
@@ -773,7 +823,12 @@ async function initArcGIS() {
             Home,
             Extent,
             reactiveUtils,
-            Weather
+            Weather,
+            EsriGraphic,
+            EsriPolygon,
+            EsriPolyline,
+            EsriSimpleFillSymbol,
+            EsriSimpleLineSymbol
         ) => {
             (async () => {
                 try {
@@ -793,6 +848,13 @@ async function initArcGIS() {
                     state.RainyWeatherClass = RainyWeather;
                     state.SnowyWeatherClass = SnowyWeather;
                     state.FoggyWeatherClass = FoggyWeather;
+                    setTidefieldModules(
+                        EsriGraphic,
+                        EsriPolygon,
+                        EsriPolyline,
+                        EsriSimpleFillSymbol,
+                        EsriSimpleLineSymbol
+                    );
                     debugLog('Loading public WebScene…');
 
                     const portalItem = {
@@ -818,20 +880,42 @@ async function initArcGIS() {
                             ? CONFIG.SCENE_INITIAL_CAMERA_Z_METERS
                             : 1200;
 
+                    const ic = CONFIG.SCENE_INITIAL_CAMERA;
+                    const useInitialCameraPreset =
+                        ic &&
+                        typeof ic.longitude === 'number' &&
+                        Number.isFinite(ic.longitude) &&
+                        typeof ic.latitude === 'number' &&
+                        Number.isFinite(ic.latitude) &&
+                        typeof ic.z === 'number' &&
+                        Number.isFinite(ic.z);
+
+                    const initialCamera = useInitialCameraPreset
+                        ? {
+                              position: {
+                                  longitude: ic.longitude,
+                                  latitude: ic.latitude,
+                                  z: ic.z
+                              },
+                              heading: typeof ic.heading === 'number' && Number.isFinite(ic.heading) ? ic.heading : 0,
+                              tilt: typeof ic.tilt === 'number' && Number.isFinite(ic.tilt) ? ic.tilt : 45
+                          }
+                        : {
+                              position: {
+                                  longitude: CONFIG.CORAL_GABLES_CENTER.longitude,
+                                  latitude: CONFIG.CORAL_GABLES_CENTER.latitude,
+                                  z: camZ
+                              },
+                              tilt: 45,
+                              heading: 0
+                          };
+
                     state.sceneView = new SceneView({
                         container: 'viewDiv',
                         map: map,
                         viewingMode: 'global',
                         qualityProfile: getSceneQualityProfile(),
-                        camera: {
-                            position: {
-                                longitude: CONFIG.CORAL_GABLES_CENTER.longitude,
-                                latitude: CONFIG.CORAL_GABLES_CENTER.latitude,
-                                z: camZ
-                            },
-                            tilt: 45,
-                            heading: 0
-                        },
+                        camera: initialCamera,
                         popup: {
                             dockEnabled: false,
                             dockOptions: {
@@ -847,8 +931,9 @@ async function initArcGIS() {
                         elevationInfo: { mode: 'absolute-height' }
                     });
                     state.layers.points = new GraphicsLayer({
-                        title: 'Sampling Points',
-                        elevationInfo: { mode: 'absolute-height' }
+                        title: 'Weather Points',
+                        elevationInfo: { mode: 'absolute-height' },
+                        visible: false
                     });
                     state.layers.wind = new GraphicsLayer({
                         title: 'Wind Vectors',
@@ -856,7 +941,28 @@ async function initArcGIS() {
                         visible: false
                     });
 
-                    map.addMany([state.layers.grid, state.layers.points, state.layers.wind]);
+                    state.layers.membrane = new GraphicsLayer({
+                        title: 'Tidefield Membrane',
+                        elevationInfo: { mode: 'absolute-height' },
+                        listMode: 'hide'
+                    });
+                    state.layers.tether = new GraphicsLayer({
+                        title: 'Tidefield Tethers',
+                        elevationInfo: { mode: 'absolute-height' },
+                        listMode: 'hide'
+                    });
+                    const tideOn = isTidefieldMembraneActive();
+                    state.layers.membrane.visible = tideOn;
+                    state.layers.tether.visible = tideOn;
+                    map.addMany([
+                        state.layers.grid,
+                        state.layers.membrane,
+                        state.layers.tether,
+                        state.layers.points,
+                        state.layers.wind
+                    ]);
+                    // Tidefield RAF + requestRender must NOT start until after initial
+                    // `whenOnce(!updating)` — register only at end of init when that preset is on.
 
                     await map.when();
                     if (typeof map.loadAll === 'function') {
@@ -904,7 +1010,7 @@ async function initArcGIS() {
 
                     debugLog('✓ Map controls added (single toolbar, portal UI cleared)');
 
-                    if (CONFIG.SCENE_FRAME_FULL_EXTENT_ON_LOAD !== false) {
+                    if (CONFIG.SCENE_FRAME_FULL_EXTENT_ON_LOAD !== false && !useInitialCameraPreset) {
                         showLoading(true, 'Loading Coral Gables area…');
                         debugLog('Framing full Coral Gables extent & preloading scene…');
                         const g = CONFIG.GRID_EXTENT;
@@ -953,7 +1059,10 @@ async function initArcGIS() {
                             await new Promise((r) => setTimeout(r, 120));
                         }
                         try {
-                            await reactiveUtils.whenOnce(() => !state.sceneView.updating);
+                            await Promise.race([
+                                reactiveUtils.whenOnce(() => !state.sceneView.updating),
+                                new Promise((r) => setTimeout(r, 8000))
+                            ]);
                         } catch (e) {
                             /* still settling */
                         }
@@ -963,6 +1072,8 @@ async function initArcGIS() {
                             await new Promise((r) => setTimeout(r, 120));
                         }
                         debugLog('✓ Coral Gables extent framed; scene view idle');
+                    } else if (useInitialCameraPreset) {
+                        debugLog('✓ Opening view: SCENE_INITIAL_CAMERA (extent framing skipped)');
                     }
 
                     // WebScene presentation can still inject saved UI after the first navigation; strip other corners only.
@@ -1069,7 +1180,23 @@ async function initArcGIS() {
                         }, CONFIG.SCENE_LIGHTING_UPDATE_INTERVAL_MS);
                     }
 
+                    if (
+                        isTidefieldMembraneActive() &&
+                        state.layers.membrane &&
+                        state.layers.tether &&
+                        state.layers.grid &&
+                        state.sceneView
+                    ) {
+                        registerTidefieldContext('main', {
+                            gridLayer: state.layers.grid,
+                            membraneLayer: state.layers.membrane,
+                            tetherLayer: state.layers.tether,
+                            views: [state.sceneView]
+                        });
+                    }
+
                     debugLog('SceneView ready!');
+                    wireSceneCameraDebugToTerminal(state.sceneView);
                     resolve();
                 } catch (error) {
                     console.error('Error in initArcGIS:', error);
@@ -1082,13 +1209,67 @@ async function initArcGIS() {
 }
 
 /**
+ * Slow looping CSS sweep over the map while weather fetch runs (all grid looks).
+ * Stop is deferred until the current animation *leg* finishes so the band does not vanish mid-screen.
+ */
+function startGlobalRefreshScanWhileLoading() {
+    const el = document.getElementById('refreshScanOverlay');
+    if (!el) {
+        return;
+    }
+    if (refreshScanStopTimerId != null) {
+        clearTimeout(refreshScanStopTimerId);
+        refreshScanStopTimerId = null;
+    }
+    const c = CONFIG.TIDEfield_SCAN_COLOR || [34, 190, 96, 82];
+    const a = (typeof c[3] === 'number' ? c[3] : 82) / 255;
+    el.style.setProperty('--rs-r', String(Math.round(c[0])));
+    el.style.setProperty('--rs-g', String(Math.round(c[1])));
+    el.style.setProperty('--rs-b', String(Math.round(c[2])));
+    el.style.setProperty('--rs-a', String(a));
+    const leg = CONFIG.WEATHER_LOADING_SCAN_LEG_DURATION_MS ?? 6800;
+    el.style.setProperty('--refresh-scan-leg-dur', `${leg}ms`);
+    el.classList.remove('hidden');
+    el.classList.remove('refresh-scan-overlay--loading');
+    void el.offsetWidth;
+    refreshScanAnimStartMs = performance.now();
+    el.classList.add('refresh-scan-overlay--loading');
+}
+
+function stopGlobalRefreshScanWhileLoading() {
+    const el = document.getElementById('refreshScanOverlay');
+    if (!el) {
+        return;
+    }
+    if (!el.classList.contains('refresh-scan-overlay--loading')) {
+        return;
+    }
+    if (refreshScanStopTimerId != null) {
+        clearTimeout(refreshScanStopTimerId);
+        refreshScanStopTimerId = null;
+    }
+    const leg = Math.max(400, CONFIG.WEATHER_LOADING_SCAN_LEG_DURATION_MS ?? 6800);
+    const elapsed = performance.now() - refreshScanAnimStartMs;
+    let remaining = leg - (elapsed % leg);
+    if (remaining < 48) {
+        remaining += leg;
+    }
+    refreshScanStopTimerId = setTimeout(() => {
+        refreshScanStopTimerId = null;
+        el.classList.remove('refresh-scan-overlay--loading');
+        el.classList.add('hidden');
+    }, remaining);
+}
+
+/**
  * Refresh weather data from APIs
  */
 async function refreshWeatherData() {
     try {
-        showLoading(true, 'Fetching weather data...');
         debugLog('Fetching weather for ' + state.samplingPoints.length + ' points...');
-        
+
+        startGlobalRefreshScanWhileLoading();
+
         state.coralGablesLiveWeather = null;
 
         /** NWS-first merge at the official map center — matches local “live” Coral Gables conditions */
@@ -1145,6 +1326,7 @@ async function refreshWeatherData() {
                 temperature: 70 + Math.random() * 20, // Random temp 70-90°F
                 humidity: 50 + Math.random() * 30,
                 windSpeed: Math.random() * 15,
+                windDirection: Math.random() * 360,
                 pressure: 1013 + (Math.random() * 10 - 5),
                 source: 'sample-data'
             }));
@@ -1188,11 +1370,11 @@ async function refreshWeatherData() {
             console.warn('DB storage failed:', dbError);
         }
         
-        // Update visualization with REAL data
+        // Update visualization with REAL data (loading scans stop in `finally`)
         if (state.currentMode === 'split-screen') {
-            await updateSplitVisualization();
+            await updateSplitVisualization({ membranePulse: true });
         } else {
-            updateVisualization(state.samplingPoints, state.gridCells);
+            updateVisualization(state.samplingPoints, state.gridCells, null, { membranePulse: true });
         }
 
         syncSceneAtmosphereFromApiWeather();
@@ -1219,17 +1401,17 @@ async function refreshWeatherData() {
             debugLog('Alert check failed: ' + err.message);
         }
         
-        showLoading(false);
         debugLog('✓ Refresh complete');
-        
     } catch (error) {
         console.error('Failed to refresh weather data:', error);
         debugLog('✗ Refresh failed: ' + error.message, true);
-        
+
         // Update UI with error state
         showError('Weather refresh failed. Displaying last known data.');
         updateDataSourceDisplay(0, state.samplingPoints.length);
-        showLoading(false);
+    } finally {
+        stopGlobalRefreshScanWhileLoading();
+        scheduleNextWeatherRefreshFromNow();
     }
 }
 
@@ -1306,9 +1488,58 @@ function buildGridReliefGeometry(gridCells, samplingPoints, idwPower = 2) {
 }
 
 /**
+ * Min/max °F for the same field used to tint the grid (relief corners + cell centers, else point/cell fallbacks).
+ */
+function getLegendTempBounds(samplingPoints, gridCells) {
+    if (gridCells?.length && samplingPoints?.length) {
+        const relief = buildGridReliefGeometry(gridCells, samplingPoints, 2);
+        if (relief) {
+            return { minT: relief.minT, maxT: relief.maxT };
+        }
+    }
+    const ts = [];
+    for (const p of samplingPoints || []) {
+        const t = p?.weatherData?.temperature;
+        if (typeof t === 'number' && !Number.isNaN(t)) {
+            ts.push(t);
+        }
+    }
+    for (const c of gridCells || []) {
+        const t = c?.interpolatedData?.temperature;
+        if (typeof t === 'number' && !Number.isNaN(t)) {
+            ts.push(t);
+        }
+    }
+    if (!ts.length) {
+        return null;
+    }
+    return { minT: Math.min(...ts), maxT: Math.max(...ts) };
+}
+
+/**
+ * Grid cell whose bounds contain the sampling point (same cell the mesh uses for that spot).
+ */
+function findGridCellUnderPoint(lon, lat, gridCells) {
+    if (!gridCells || !gridCells.length) {
+        return null;
+    }
+    for (let i = 0; i < gridCells.length; i++) {
+        const cell = gridCells[i];
+        const b = cell?.bounds;
+        if (!b) {
+            continue;
+        }
+        if (lon >= b.west && lon <= b.east && lat >= b.south && lat <= b.north) {
+            return cell;
+        }
+    }
+    return null;
+}
+
+/**
  * Update visualization (with real or default data)
  */
-function updateVisualization(samplingPoints, gridCells, layersOverride = null) {
+function updateVisualization(samplingPoints, gridCells, layersOverride = null, vizOptions = null) {
     // Safety checks
     if (!samplingPoints || !Array.isArray(samplingPoints)) {
         debugLog('⚠ Invalid samplingPoints in updateVisualization');
@@ -1340,6 +1571,27 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null) {
             
             let pointsAdded = 0;
             let cellsAdded = 0;
+
+            const tide = isTidefieldMembraneActive();
+            const basic = isBasicGridActive();
+            const fillAlpha = tide
+                ? (CONFIG.TIDEfield_GRID_FILL_ALPHA ?? 55)
+                : basic
+                  ? 0
+                  : (CONFIG.GULF_GLASS_GRID_FILL_ALPHA ?? 38);
+            const outlineAlpha = tide
+                ? (CONFIG.TIDEfield_GRID_OUTLINE_ALPHA ?? 200)
+                : basic
+                  ? (CONFIG.BASIC_GRID_OUTLINE_ALPHA ?? 118)
+                  : (CONFIG.GULF_GLASS_GRID_OUTLINE_ALPHA ?? 150);
+            const reliefForPalette =
+                gridCells && gridCells.length > 0 && samplingPoints && samplingPoints.length > 0
+                    ? buildGridReliefGeometry(gridCells, samplingPoints, 2)
+                    : null;
+
+            /** All grid looks use the same legend scale (`TEMP_COLOR_GRADIENT` via relief normalization). */
+            const tempToRgb = (temp, minT, maxT, range) =>
+                classicReliefTempRgb(temp, minT, maxT, range);
         
             // Add sampling points
             if (samplingPoints && samplingPoints.length > 0) {
@@ -1347,16 +1599,51 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null) {
                     if (!point || !point.weatherData || point.weatherData.error) return;
                     
                     try {
+                        const t = point.weatherData.temperature;
+                        let rgb = [255, 255, 255];
+                        const hostCell = findGridCellUnderPoint(
+                            point.longitude,
+                            point.latitude,
+                            gridCells
+                        );
+                        let tForPalette = t;
+                        if (
+                            hostCell &&
+                            hostCell.interpolatedData &&
+                            hostCell.interpolatedData.temperature != null &&
+                            !Number.isNaN(hostCell.interpolatedData.temperature)
+                        ) {
+                            tForPalette = hostCell.interpolatedData.temperature;
+                        }
+                        if (reliefForPalette && tForPalette != null && !Number.isNaN(tForPalette)) {
+                            rgb = tempToRgb(
+                                tForPalette,
+                                reliefForPalette.minT,
+                                reliefForPalette.maxT,
+                                reliefForPalette.range
+                            );
+                        }
+                        const zBeacon = basic ? 50 : tide
+                            ? (CONFIG.TIDEfield_BEACON_Z_METERS ?? 52)
+                            : (CONFIG.GULF_GLASS_BEACON_Z_METERS ?? 48);
+                        const basicOutlineA = CONFIG.BASIC_GRID_OUTLINE_ALPHA ?? 118;
                         const graphic = new Graphic({
                 geometry: new Point({
                     longitude: point.longitude,
                     latitude: point.latitude,
-                    z: 50
+                    z: zBeacon
                 }),
                 symbol: new SimpleMarkerSymbol({
-                    color: [255, 255, 255],
-                    size: 12,
-                    outline: { color: [0, 0, 0], width: 2 }
+                    color: basic ? [...rgb, 250] : [...rgb, tide ? 228 : 216],
+                    size: basic ? 12 : tide ? (CONFIG.TIDEfield_BEACON_SIZE ?? 14) : (CONFIG.GULF_GLASS_BEACON_SIZE ?? 12),
+                    outline: {
+                        color: basic
+                            ? [...rgb, basicOutlineA]
+                            : tide
+                              ? (CONFIG.TIDEfield_BEACON_OUTLINE || [72, 228, 150, 255])
+                              : (CONFIG.GULF_GLASS_BEACON_OUTLINE || [52, 198, 118, 232]),
+                        width: basic ? 2 : tide ? 2.5 : 2
+                    }
                 }),
                 attributes: {
                     pointId: point.id,
@@ -1375,7 +1662,7 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null) {
                     source: point.weatherData.source || 'Unknown'
                 },
                 popupTemplate: new PopupTemplate({
-                    title: `Sample: ${point.id}`,
+                    title: `Weather: ${point.id}`,
                     content: `
                         <b>Temperature:</b> {temperature}°F<br>
                         <b>Feels Like:</b> {feelsLike}°F<br>
@@ -1403,7 +1690,7 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null) {
             
             // Add grid cells with interpolated data (min/max-normalized relief + per-corner Z for crumpling)
             if (gridCells && gridCells.length > 0) {
-                const relief = buildGridReliefGeometry(gridCells, samplingPoints, 2);
+                const relief = reliefForPalette || buildGridReliefGeometry(gridCells, samplingPoints, 2);
                 const flatZ =
                     CONFIG.GRID_BASE_ELEVATION_METERS + CONFIG.GRID_TEMP_RELIEF_METERS * 0.5;
 
@@ -1413,13 +1700,21 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null) {
                     try {
             let temp = 75; // Default
                     let meanCornerZ = flatZ;
-                    let color = [0, 255, 0];
+                    let color = [46, 188, 108];
                     let hasData = false;
                     
                     if (cell.interpolatedData && cell.interpolatedData.temperature != null) {
                         temp = cell.interpolatedData.temperature;
                 hasData = true;
             }
+
+                    if (hasData) {
+                        if (relief) {
+                            color = tempToRgb(temp, relief.minT, relief.maxT, relief.range);
+                        } else {
+                            color = tempToRgb(temp, temp - 15, temp + 15, 30);
+                        }
+                    }
 
             let ring;
             if (hasData && relief) {
@@ -1455,8 +1750,11 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null) {
                     const graphic = new Graphic({
                         geometry: polygon,
                         symbol: new SimpleFillSymbol({
-                            color: hasData ? [...color, 0] : [128, 128, 128, 0],
-                            outline: { color: hasData ? [...color, 255] : [128, 128, 128, 255], width: 2 }
+                            color: hasData ? [...color, fillAlpha] : [128, 128, 128, 0],
+                            outline: {
+                                color: hasData ? [...color, outlineAlpha] : [40, 85, 62, 210],
+                                width: tide ? 1.75 : 2
+                            }
                         }),
                 attributes: {
                     cellId: cell.id,
@@ -1493,6 +1791,23 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null) {
             
             // Render wind vectors
             renderWindVectors(samplingPoints, layersOverride);
+
+            if (isTidefieldMembraneActive()) {
+                const membraneCtxId =
+                    layersOverride && layersOverride.grid === state.layers.splitGrid ? 'split' : 'main';
+                afterGridRebuild(membraneCtxId, samplingPoints);
+                if (vizOptions && vizOptions.membranePulse) {
+                    triggerMembranePulse();
+                }
+            }
+
+            const isSplitRightPane =
+                layersOverride &&
+                state.layers.splitGrid &&
+                layersOverride.grid === state.layers.splitGrid;
+            if (!isSplitRightPane) {
+                syncTempLegendGradient(getLegendTempBounds(samplingPoints, gridCells));
+            }
             
         } catch (vizError) {
             console.error('Visualization error:', vizError);
@@ -1502,148 +1817,427 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null) {
 }
 
 /**
+ * Legend gradient + live min/max labels for the frame that was just drawn (main / split-left only).
+ * @param {{ minT: number, maxT: number } | null} bounds
+ */
+function syncTempLegendGradient(bounds) {
+    const el = document.getElementById('tempGradient');
+    if (el) {
+        el.style.background = tempGradientCssLinear();
+    }
+    const minEl = document.getElementById('minTemp');
+    const maxEl = document.getElementById('maxTemp');
+    const fmt = (v) =>
+        typeof v === 'number' && Number.isFinite(v) ? `${v.toFixed(1)}°F` : '--°F';
+    const lo = bounds?.minT;
+    const hi = bounds?.maxT;
+    if (minEl) {
+        minEl.textContent = fmt(lo);
+    }
+    if (maxEl) {
+        maxEl.textContent = fmt(hi);
+    }
+}
+
+/**
+ * Apply grid look (Gulf Glass / Basic Grid / Tidefield Membrane — layers, tidefield registration, redraw).
+ */
+function applyMapVisualStyle() {
+    const tide = isTidefieldMembraneActive();
+    try {
+        if (state.layers.membrane) {
+            state.layers.membrane.visible = tide;
+        }
+        if (state.layers.tether) {
+            state.layers.tether.visible = tide;
+        }
+        if (state.layers.splitMembrane) {
+            state.layers.splitMembrane.visible = tide;
+        }
+        if (state.layers.splitTether) {
+            state.layers.splitTether.visible = tide;
+        }
+    } catch (e) {
+        console.warn('applyMapVisualStyle visibility:', e);
+    }
+
+    if (tide) {
+        if (state.layers.grid && state.layers.membrane && state.layers.tether && state.sceneView) {
+            registerTidefieldContext('main', {
+                gridLayer: state.layers.grid,
+                membraneLayer: state.layers.membrane,
+                tetherLayer: state.layers.tether,
+                views: [state.sceneView]
+            });
+        }
+        if (
+            state.currentMode === 'split-screen' &&
+            state.layers.splitGrid &&
+            state.layers.splitMembrane &&
+            state.layers.splitTether &&
+            state.rightSceneView
+        ) {
+            registerTidefieldContext('split', {
+                gridLayer: state.layers.splitGrid,
+                membraneLayer: state.layers.splitMembrane,
+                tetherLayer: state.layers.splitTether,
+                views: [state.rightSceneView]
+            });
+        }
+    } else {
+        unregisterTidefieldContext('main');
+        unregisterTidefieldContext('split');
+    }
+
+    if (state.currentMode === 'split-screen') {
+        void updateSplitVisualization();
+    } else if (state.samplingPoints && state.gridCells) {
+        updateVisualization(state.samplingPoints, state.gridCells);
+    }
+}
+
+/** Meteorological degrees (0–360, clockwise from N) → 16-point compass label for “wind from”. */
+function windDirectionToCompass16(degrees) {
+    const dirs = [
+        'N',
+        'NNE',
+        'NE',
+        'ENE',
+        'E',
+        'ESE',
+        'SE',
+        'SSE',
+        'S',
+        'SSW',
+        'SW',
+        'WSW',
+        'W',
+        'WNW',
+        'NW',
+        'NNW'
+    ];
+    const d = ((Number(degrees) % 360) + 360) % 360;
+    const idx = Math.round(d / 22.5) % 16;
+    return dirs[idx];
+}
+
+/** NWS-style merged reading or center sampling point — for map + legend wind line. */
+function getCoralGablesWindReading() {
+    const w = state.coralGablesLiveWeather;
+    if (
+        w &&
+        typeof w.windSpeed === 'number' &&
+        Number.isFinite(w.windSpeed) &&
+        typeof w.windDirection === 'number' &&
+        Number.isFinite(w.windDirection)
+    ) {
+        return { speed: w.windSpeed, fromDeg: w.windDirection };
+    }
+    const center = state.samplingPoints?.find((p) => p.id === 'center');
+    const wd = center?.weatherData;
+    if (
+        wd &&
+        typeof wd.windSpeed === 'number' &&
+        Number.isFinite(wd.windSpeed) &&
+        typeof wd.windDirection === 'number' &&
+        Number.isFinite(wd.windDirection)
+    ) {
+        return { speed: wd.windSpeed, fromDeg: wd.windDirection };
+    }
+    return null;
+}
+
+/** Wind line rgba by speed bucket — matches `CONFIG.WIND_VECTOR_*` and temp legend palette */
+function windVectorLineColor(mph) {
+    const br = CONFIG.WIND_VECTOR_SPEED_BREAKS_MPH || [10, 20, 30];
+    const cols = CONFIG.WIND_VECTOR_COLORS;
+    if (!cols || cols.length < 4) {
+        return [42, 188, 108, 225];
+    }
+    if (mph <= br[0]) {
+        return [...cols[0]];
+    }
+    if (mph <= br[1]) {
+        return [...cols[1]];
+    }
+    if (mph <= br[2]) {
+        return [...cols[2]];
+    }
+    return [...cols[3]];
+}
+
+/**
  * Render wind vectors based on sampling points
  */
 function renderWindVectors(samplingPoints, layersOverride = null) {
     if (!samplingPoints || !Array.isArray(samplingPoints)) return;
     const layers = layersOverride || state.layers;
     if (!layers || !layers.wind) return;
-    
+
+    const gridWindZ = 100;
+    const maxGridLenDeg = 0.003;
+    const gridRefSpeedMph = 40;
+
     require([
         'esri/Graphic',
         'esri/geometry/Polyline',
-        'esri/symbols/SimpleLineSymbol'
-    ], (Graphic, Polyline, SimpleLineSymbol) => {
+        'esri/symbols/LineSymbol3D',
+        'esri/symbols/LineSymbol3DLayer',
+        'esri/PopupTemplate'
+    ], (Graphic, Polyline, LineSymbol3D, LineSymbol3DLayer, PopupTemplate) => {
         try {
             layers.wind.removeAll();
             let vectorsAdded = 0;
-            
-            samplingPoints.forEach(point => {
-                if (!point || !point.weatherData || !point.weatherData.windSpeed) return;
-                
+
+            samplingPoints.forEach((point) => {
+                if (!point || !point.weatherData) return;
+                const ws = point.weatherData.windSpeed;
+                if (ws == null || ws === '' || Number(ws) <= 0) return;
+
                 try {
-                    const windSpeed = point.weatherData.windSpeed || 0;
-                    const windDirection = point.weatherData.windDirection || 0;
-                    
-                    // Scale arrow length based on wind speed (0-40 mph → 0.0005-0.003 degrees)
-                    const arrowLength = Math.min(0.003, (windSpeed / 40) * 0.003);
-                    
-                    // Convert wind direction to radians (0° = north, 90° = east)
-                    const directionRad = (windDirection * Math.PI) / 180;
-                    
-                    // Calculate end point (wind blows FROM this direction, draw arrow pointing that way)
+                    const windSpeed = Number(ws);
+                    const windFromDeg = Number(point.weatherData.windDirection) || 0;
+                    // Downwind direction (where air is moving); “wind from” is meteorological convention.
+                    const downDeg = (windFromDeg + 180) % 360;
+                    const directionRad = (downDeg * Math.PI) / 180;
+
+                    const arrowLength = Math.min(maxGridLenDeg, (windSpeed / gridRefSpeedMph) * maxGridLenDeg);
+
                     const endLat = point.latitude + arrowLength * Math.cos(directionRad);
                     const endLon = point.longitude + arrowLength * Math.sin(directionRad);
-                    
-                    // Wind speed color gradient (0-50 mph)
-                    let windColor = [0, 255, 0]; // Green for light wind
-                    if (windSpeed > 10) windColor = [255, 165, 0]; // Orange for moderate
-                    if (windSpeed > 20) windColor = [255, 69, 0]; // Red-orange for strong
-                    if (windSpeed > 30) windColor = [255, 0, 0]; // Red for very strong
-                    
-                    // Create polyline from point to end point
+
+                    const windColor = windVectorLineColor(windSpeed);
+                    const lineWidthPx = Math.max(1.25, Math.min(6, windSpeed / 6.5));
+
                     const polyline = new Polyline({
-                        paths: [[
-                            [point.longitude, point.latitude, 100],
-                            [endLon, endLat, 100]
-                        ]],
+                        paths: [
+                            [
+                                [point.longitude, point.latitude, gridWindZ],
+                                [endLon, endLat, gridWindZ]
+                            ]
+                        ],
                         spatialReference: { wkid: 4326 }
                     });
-                    
-                    const lineSymbol = new SimpleLineSymbol({
-                        color: windColor,
-                        width: Math.max(1, windSpeed / 10), // Thicker for stronger winds
-                        cap: 'round',
-                        join: 'round'
+
+                    const lineSymbol = new LineSymbol3D({
+                        symbolLayers: [
+                            new LineSymbol3DLayer({
+                                material: { color: windColor },
+                                size: lineWidthPx,
+                                cap: 'round',
+                                join: 'round',
+                                marker: {
+                                    type: 'style',
+                                    style: 'arrow',
+                                    placement: 'end'
+                                }
+                            })
+                        ]
                     });
-                    
+
+                    const fromLabel = windDirectionToCompass16(windFromDeg);
+                    const fromDegStr = String(Math.round(((windFromDeg % 360) + 360) % 360));
+
                     const graphic = new Graphic({
                         geometry: polyline,
                         symbol: lineSymbol,
                         attributes: {
-                            windSpeed: windSpeed,
-                            windDirection: windDirection,
-                            pointId: point.id
-                        }
+                            pointId: point.id ?? '—',
+                            windSpeedMph: windSpeed.toFixed(1),
+                            windFromLabel: fromLabel,
+                            windFromDegrees: fromDegStr
+                        },
+                        popupTemplate: new PopupTemplate({
+                            title: 'Wind · {pointId}',
+                            content:
+                                '<div style="font-size:13px;line-height:1.45">' +
+                                '<div><b>{windSpeedMph}</b> mph</div>' +
+                                '<div>From <b>{windFromLabel}</b> ({windFromDegrees}°)</div>' +
+                                '<div style="opacity:0.75;font-size:11px;margin-top:6px">Arrow points downwind (flow direction).</div>' +
+                                '</div>'
+                        })
                     });
-                    
+
                     layers.wind.add(graphic);
                     vectorsAdded++;
-                    
                 } catch (err) {
                     console.error('Error adding wind vector:', err);
                 }
             });
-            
-            if (vectorsAdded > 0) {
-                debugLog(`💨 Wind vectors: ${vectorsAdded} arrows rendered`);
+
+            const cgWind = getCoralGablesWindReading();
+            if (cgWind && cgWind.speed > 0) {
+                const { speed: cgSpeed, fromDeg: cgFrom } = cgWind;
+                const downDeg = (cgFrom + 180) % 360;
+                const rad = (downDeg * Math.PI) / 180;
+                const z = CONFIG.CORAL_GABLES_WIND_ARROW_Z_METERS;
+                const maxLen = CONFIG.CORAL_GABLES_WIND_ARROW_MAX_LEN_DEG;
+                const len = Math.min(maxLen, (cgSpeed / gridRefSpeedMph) * maxLen);
+                const lat0 = CONFIG.CORAL_GABLES_CENTER.latitude;
+                const lon0 = CONFIG.CORAL_GABLES_CENTER.longitude;
+                const endLat = lat0 + len * Math.cos(rad);
+                const endLon = lon0 + len * Math.sin(rad);
+                const cgColor = windVectorLineColor(cgSpeed);
+                const cgWidth = Math.max(2, Math.min(10, cgSpeed / 4));
+
+                const cgPoly = new Polyline({
+                    paths: [[[lon0, lat0, z], [endLon, endLat, z]]],
+                    spatialReference: { wkid: 4326 }
+                });
+                const cgSymbol = new LineSymbol3D({
+                    symbolLayers: [
+                        new LineSymbol3DLayer({
+                            material: { color: cgColor },
+                            size: cgWidth,
+                            cap: 'round',
+                            join: 'round',
+                            marker: {
+                                type: 'style',
+                                style: 'arrow',
+                                placement: 'end'
+                            }
+                        })
+                    ]
+                });
+                const compass = windDirectionToCompass16(cgFrom);
+                const cgGraphic = new Graphic({
+                    geometry: cgPoly,
+                    symbol: cgSymbol,
+                    attributes: {
+                        kind: 'coral-gables-wind',
+                        windSpeedMph: cgSpeed.toFixed(1),
+                        windFromDegrees: String(Math.round(((cgFrom % 360) + 360) % 360)),
+                        windFromLabel: compass
+                    },
+                    popupTemplate: new PopupTemplate({
+                        title: 'Coral Gables wind',
+                        content:
+                            '<div style="font-size:13px;line-height:1.45">' +
+                            '<div><b>{windSpeedMph}</b> mph</div>' +
+                            '<div>From <b>{windFromLabel}</b> ({windFromDegrees}°)</div>' +
+                            '<div style="opacity:0.75;font-size:11px;margin-top:6px">Arrow shows downwind (where air is moving).</div>' +
+                            '</div>'
+                    })
+                });
+                layers.wind.add(cgGraphic);
             }
-            
+
+            if (vectorsAdded > 0 || (cgWind && cgWind.speed > 0)) {
+                debugLog(
+                    `💨 Wind vectors: ${vectorsAdded} field arrows` +
+                        (cgWind && cgWind.speed > 0 ? ' + Coral Gables indicator' : '')
+                );
+            }
         } catch (windErr) {
             console.error('Wind rendering error:', windErr);
         }
     });
 }
 
-/**
- * Temperature to color conversion
- */
-function temperatureToColor(temp) {
-    const gradient = CONFIG.TEMP_COLOR_GRADIENT;
-    
-    for (let i = 0; i < gradient.length - 1; i++) {
-        if (temp >= gradient[i].temp && temp <= gradient[i + 1].temp) {
-            const t = (temp - gradient[i].temp) / (gradient[i + 1].temp - gradient[i].temp);
-            return [
-                Math.round(gradient[i].color[0] + t * (gradient[i + 1].color[0] - gradient[i].color[0])),
-                Math.round(gradient[i].color[1] + t * (gradient[i + 1].color[1] - gradient[i].color[1])),
-                Math.round(gradient[i].color[2] + t * (gradient[i + 1].color[2] - gradient[i].color[2]))
-            ];
-        }
+function updateWeatherMenuClock() {
+    const dateEl = document.getElementById('weatherMenuClockDate');
+    const timeEl = document.getElementById('weatherMenuClockTime');
+    const dowEl = document.getElementById('weatherMenuClockDow');
+    const mdEl = document.getElementById('weatherMenuClockMd');
+    const yrEl = document.getElementById('weatherMenuClockYr');
+    if (!timeEl) {
+        return;
     }
-    
-    return temp < gradient[0].temp ? gradient[0].color : gradient[gradient.length - 1].color;
+    const now = new Date();
+    if (dateEl) {
+        dateEl.textContent = now.toLocaleDateString(undefined, {
+            weekday: 'short',
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        });
+    }
+    if (dowEl && mdEl && yrEl) {
+        dowEl.textContent = now.toLocaleDateString(undefined, { weekday: 'short' });
+        mdEl.textContent = now.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        yrEl.textContent = now.toLocaleDateString(undefined, { year: 'numeric' });
+    }
+    timeEl.textContent = now.toLocaleTimeString(undefined, {
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+}
+
+function startWeatherMenuClock() {
+    updateWeatherMenuClock();
+    if (state.timers.weatherMenuClock) {
+        clearInterval(state.timers.weatherMenuClock);
+    }
+    state.timers.weatherMenuClock = setInterval(updateWeatherMenuClock, 1000);
 }
 
 /**
  * Setup UI event listeners
  */
 function setupEventListeners() {
-    const wireCollapsiblePanel = (panelId, btnId, titleWhenCollapsed, titleWhenExpanded) => {
-        const panel = document.getElementById(panelId);
-        const btn = document.getElementById(btnId);
-        if (!panel || !btn) {
+    /** Weather Menu: − / + button and clicking the header bar both minimize / expand */
+    (function wireWeatherMenuMinimize() {
+        const panel = document.getElementById('mapTaskbar');
+        const btn = document.getElementById('mapTaskbarMinBtn');
+        const header = panel?.querySelector('.map-taskbar__header');
+        if (!panel || !btn || !header) {
             return;
         }
         const sync = () => {
             const min = panel.classList.contains('panel--minimized');
             btn.setAttribute('aria-expanded', min ? 'false' : 'true');
             btn.textContent = min ? '+' : '−';
-            btn.title = min ? titleWhenCollapsed : titleWhenExpanded;
+            btn.title = min ? 'Show Weather Menu' : 'Hide Weather Menu';
+            panel.classList.toggle('map-taskbar--collapsed', min);
+            panel.setAttribute('aria-expanded', (!min).toString());
+            updateWeatherMenuClock();
         };
-        btn.addEventListener('click', () => {
+        const toggle = () => {
             panel.classList.toggle('panel--minimized');
             sync();
+            requestAnimationFrame(() => {
+                try {
+                    if (state.sceneView && typeof state.sceneView.resize === 'function') {
+                        state.sceneView.resize();
+                    }
+                    if (state.rightSceneView && typeof state.rightSceneView.resize === 'function') {
+                        state.rightSceneView.resize();
+                    }
+                } catch (_) {
+                    /* ignore */
+                }
+            });
+        };
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggle();
+        });
+        header.addEventListener('click', (e) => {
+            if (e.target === btn || btn.contains(e.target)) {
+                return;
+            }
+            toggle();
         });
         sync();
-    };
-    wireCollapsiblePanel(
-        'controlPanel',
-        'controlPanelMinBtn',
-        'Show controls',
-        'Hide controls'
-    );
-    wireCollapsiblePanel(
-        'legendPanel',
-        'legendPanelMinBtn',
-        'Show temperature scale & legend',
-        'Hide temperature scale & legend'
-    );
+    })();
+
+    startWeatherMenuClock();
 
     // Mode selector
     document.getElementById('modeSelector').addEventListener('change', (e) => {
         handleModeChange(e.target.value);
     });
+
+    const mapStyleEl = document.getElementById('mapVisualStyleSelect');
+    if (mapStyleEl) {
+        mapStyleEl.value = getMapVisualStyle();
+        mapStyleEl.addEventListener('change', (e) => {
+            setMapVisualStyle(e.target.value);
+            applyMapVisualStyle();
+            debugLog(`Grid Look: ${getMapVisualStyle()}`);
+        });
+    }
     
     // Refresh button
     document.getElementById('refreshBtn').addEventListener('click', () => {
@@ -1661,18 +2255,31 @@ function setupEventListeners() {
         const v = e.target.checked;
         if (state.layers.points) state.layers.points.visible = v;
         if (state.layers.splitPoints) state.layers.splitPoints.visible = v;
+        debugLog(`📍 Weather points ${v ? 'shown' : 'hidden'}`);
     });
-    
-    document.getElementById('toggleWind').addEventListener('change', (e) => {
-        const v = e.target.checked;
-        if (state.layers.wind) {
-            state.layers.wind.visible = v;
-            debugLog(`💨 Wind vectors ${v ? 'enabled' : 'disabled'}`);
-        }
-        if (state.layers.splitWind) {
-            state.layers.splitWind.visible = v;
-        }
-    });
+
+    const toggleWindEl = document.getElementById('toggleWind');
+    if (toggleWindEl) {
+        toggleWindEl.addEventListener('change', (e) => {
+            const v = e.target.checked;
+            if (state.layers.wind) state.layers.wind.visible = v;
+            if (state.layers.splitWind) state.layers.splitWind.visible = v;
+            debugLog(`💨 Wind vectors ${v ? 'shown' : 'hidden'}`);
+        });
+    }
+
+    const toggleAlertsEl = document.getElementById('toggleAlerts');
+    if (toggleAlertsEl) {
+        state.alertsUiEnabled = toggleAlertsEl.checked;
+        toggleAlertsEl.addEventListener('change', (e) => {
+            state.alertsUiEnabled = e.target.checked;
+            if (!state.alertsUiEnabled) {
+                clearAllAlertToasts();
+            } else {
+                void checkWeatherAlerts();
+            }
+        });
+    }
     
     // Playback controls
     document.getElementById('playBtn').addEventListener('click', startPlayback);
@@ -1703,10 +2310,7 @@ function setupEventListeners() {
         rightViewModeEl.addEventListener('change', onSplitModeSelectChange);
     }
     
-    // Alert dismiss
-    document.getElementById('dismissAlert').addEventListener('click', () => {
-        document.getElementById('alertBanner').classList.add('hidden');
-    });
+    syncTempLegendGradient(getLegendTempBounds(state.samplingPoints, state.gridCells));
     
     debugLog('Event listeners registered');
 }
@@ -1861,7 +2465,7 @@ function updateSplitViewLabels() {
     }
 }
 
-async function updateSplitVisualization() {
+async function updateSplitVisualization(splitVizOptions = null) {
     clearSplitLinkedSelectionVisual();
 
     const leftMode = document.getElementById('leftViewMode')?.value || 'current';
@@ -1896,8 +2500,14 @@ async function updateSplitVisualization() {
         return;
     }
 
+    const pulse = splitVizOptions && splitVizOptions.membranePulse;
     updateVisualization(leftData.samplingPoints, leftData.gridCells);
-    updateVisualization(rightData.samplingPoints, rightData.gridCells, rightLayers);
+    updateVisualization(
+        rightData.samplingPoints,
+        rightData.gridCells,
+        rightLayers,
+        pulse ? { membranePulse: true } : null
+    );
     updateSplitViewLabels();
 }
 
@@ -1935,7 +2545,7 @@ function applySplitLinkedHighlight(graphic) {
         const prev = graphic.symbol.clone();
         state.splitSelectionRestore.push({ graphic, symbol: prev });
         const h = graphic.symbol.clone();
-        const accent = [255, 193, 7, 255];
+        const accent = [46, 188, 108, 255];
         if (h.type === 'simple-marker') {
             h.size = Math.max(Number(h.size) || 12, 16) + 2;
             h.outline = { color: accent, width: 3 };
@@ -2276,6 +2886,7 @@ function clearSplitRightInternalWatches() {
 }
 
 function teardownSplitScreen() {
+    unregisterTidefieldContext('split');
     state.splitScreenEpoch += 1;
     state.splitCameraSyncing = false;
     unwireSplitLinkedSelection();
@@ -2351,21 +2962,42 @@ function initializeSplitScreen() {
                         elevationInfo: { mode: 'absolute-height' }
                     });
                     state.layers.splitPoints = new GraphicsLayer({
-                        title: 'Sampling Points (compare)',
-                        elevationInfo: { mode: 'absolute-height' }
+                        title: 'Weather Points (compare)',
+                        elevationInfo: { mode: 'absolute-height' },
+                        visible: state.layers.points ? state.layers.points.visible : false
                     });
                     state.layers.splitWind = new GraphicsLayer({
                         title: 'Wind (compare)',
                         elevationInfo: { mode: 'absolute-height' },
                         visible: state.layers.wind ? state.layers.wind.visible : false
                     });
+                    state.layers.splitMembrane = new GraphicsLayer({
+                        title: 'Tidefield Membrane (compare)',
+                        elevationInfo: { mode: 'absolute-height' },
+                        listMode: 'hide'
+                    });
+                    state.layers.splitTether = new GraphicsLayer({
+                        title: 'Tidefield Tethers (compare)',
+                        elevationInfo: { mode: 'absolute-height' },
+                        listMode: 'hide'
+                    });
+                    const splitTide = isTidefieldMembraneActive();
+                    state.layers.splitMembrane.visible = splitTide;
+                    state.layers.splitTether.visible = splitTide;
                     state.splitMap.addMany([
                         state.layers.splitGrid,
+                        state.layers.splitMembrane,
+                        state.layers.splitTether,
                         state.layers.splitPoints,
                         state.layers.splitWind
                     ]);
                 } else if (state.layers.splitWind && state.layers.wind) {
                     state.layers.splitWind.visible = state.layers.wind.visible;
+                    if (state.layers.splitMembrane && state.layers.splitTether) {
+                        const v = isTidefieldMembraneActive();
+                        state.layers.splitMembrane.visible = v;
+                        state.layers.splitTether.visible = v;
+                    }
                 }
 
                 const leftEl = document.getElementById('leftView');
@@ -2506,6 +3138,21 @@ function initializeSplitScreen() {
 
                 applySceneEnvironment(state.rightSceneView);
 
+                if (
+                    isTidefieldMembraneActive() &&
+                    state.layers.splitGrid &&
+                    state.layers.splitMembrane &&
+                    state.layers.splitTether &&
+                    state.rightSceneView
+                ) {
+                    registerTidefieldContext('split', {
+                        gridLayer: state.layers.splitGrid,
+                        membraneLayer: state.layers.splitMembrane,
+                        tetherLayer: state.layers.splitTether,
+                        views: [state.rightSceneView]
+                    });
+                }
+
                 await updateSplitVisualization();
                 if (!splitStillValid()) {
                     return;
@@ -2587,15 +3234,24 @@ function applySnapshotToVisualization(snapshot) {
     updateVisualization(snapshotPoints, snapshotGridCells);
 }
 
+/** Countdown target + static “every N min” copy in the control panel (uses CONFIG). */
+function scheduleNextWeatherRefreshFromNow() {
+    state.nextRefreshTime = Date.now() + CONFIG.WEATHER_REFRESH_INTERVAL;
+    const note = document.getElementById('refreshIntervalNote');
+    if (note) {
+        const minutes = Math.max(1, Math.round(CONFIG.WEATHER_REFRESH_INTERVAL / 60000));
+        note.textContent = `Every ${minutes} min · `;
+    }
+}
+
 /**
  * Start auto-refresh timers
  */
 function startAutoRefresh() {
-    state.nextRefreshTime = Date.now() + CONFIG.WEATHER_REFRESH_INTERVAL;
+    scheduleNextWeatherRefreshFromNow();
     
     state.timers.weatherRefresh = setInterval(() => {
         refreshWeatherData();
-        state.nextRefreshTime = Date.now() + CONFIG.WEATHER_REFRESH_INTERVAL;
     }, CONFIG.WEATHER_REFRESH_INTERVAL);
     
     state.timers.alertRefresh = setInterval(() => {
@@ -2628,17 +3284,139 @@ function updateCountdown() {
  * Check weather alerts
  */
 async function checkWeatherAlerts() {
+    if (!state.alertsUiEnabled) {
+        return;
+    }
     try {
         const alerts = await WeatherService.fetchWeatherAlerts(
             CONFIG.CORAL_GABLES_CENTER.latitude,
             CONFIG.CORAL_GABLES_CENTER.longitude
         );
-        
+
         if (alerts && alerts.length > 0) {
-            showAlert(alerts[0]);
+            showWeatherAlertToasts(alerts);
+        } else {
+            pruneAlertToastTracking([]);
         }
     } catch (error) {
         // Silent fail for alerts
+    }
+}
+
+function alertStableKey(alert) {
+    return String(alert.id || `${alert.event}|${alert.onset}`);
+}
+
+function pruneAlertToastTracking(currentAlerts) {
+    const active = new Set(currentAlerts.map(alertStableKey));
+    for (const id of alertToastRuntime.shownIds) {
+        if (!active.has(id)) {
+            alertToastRuntime.shownIds.delete(id);
+        }
+    }
+    for (const id of alertToastRuntime.dismissedIds) {
+        if (!active.has(id)) {
+            alertToastRuntime.dismissedIds.delete(id);
+        }
+    }
+}
+
+function clearAllAlertToasts() {
+    const host = document.getElementById('alertToastHost');
+    if (host) {
+        host.replaceChildren();
+    }
+    for (const t of alertToastRuntime.autoHideTimers.values()) {
+        clearTimeout(t);
+    }
+    alertToastRuntime.autoHideTimers.clear();
+    alertToastRuntime.shownIds.clear();
+    alertToastRuntime.dismissedIds.clear();
+}
+
+function dismissAlertToast(toastEl, key, userInitiated) {
+    const pending = alertToastRuntime.autoHideTimers.get(key);
+    if (pending) {
+        clearTimeout(pending);
+        alertToastRuntime.autoHideTimers.delete(key);
+    }
+    if (userInitiated) {
+        alertToastRuntime.dismissedIds.add(key);
+    }
+    if (!toastEl.isConnected) {
+        return;
+    }
+    const exitMs = CONFIG.ALERT_TOAST_EXIT_MS ?? 420;
+    toastEl.style.transitionDuration = `${exitMs}ms`;
+    toastEl.classList.add('alert-toast--leaving');
+    let finished = false;
+    const finish = () => {
+        if (finished) {
+            return;
+        }
+        finished = true;
+        toastEl.remove();
+    };
+    toastEl.addEventListener('transitionend', finish, { once: true });
+    setTimeout(finish, exitMs + 80);
+}
+
+/**
+ * Small top-center toasts; dismissible, auto fade-out (see CONFIG.ALERT_TOAST_*).
+ */
+function showWeatherAlertToasts(alerts) {
+    if (!state.alertsUiEnabled) {
+        return;
+    }
+    const host = document.getElementById('alertToastHost');
+    if (!host) {
+        return;
+    }
+    pruneAlertToastTracking(alerts);
+    const max = CONFIG.ALERT_TOAST_MAX_VISIBLE ?? 3;
+    const slice = alerts.slice(0, max);
+    for (const alert of slice) {
+        const key = alertStableKey(alert);
+        if (alertToastRuntime.dismissedIds.has(key)) {
+            continue;
+        }
+        if (alertToastRuntime.shownIds.has(key)) {
+            continue;
+        }
+        alertToastRuntime.shownIds.add(key);
+
+        const toast = document.createElement('div');
+        toast.className = 'alert-toast';
+        toast.setAttribute('role', 'status');
+
+        const sev = alert.severity || '';
+        if (sev === 'Moderate') {
+            toast.classList.add('alert-toast--warning');
+        } else if (sev === 'Minor') {
+            toast.classList.add('alert-toast--advisory');
+        }
+
+        const text = document.createElement('div');
+        text.className = 'alert-toast__text';
+        text.textContent = alert.headline || alert.event || 'Weather alert';
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'alert-toast__dismiss';
+        btn.setAttribute('aria-label', 'Dismiss alert');
+        btn.textContent = '✕';
+        btn.addEventListener('click', () => dismissAlertToast(toast, key, true));
+
+        toast.appendChild(text);
+        toast.appendChild(btn);
+        host.appendChild(toast);
+
+        const autoMs = CONFIG.ALERT_TOAST_AUTO_DISMISS_MS ?? 9000;
+        const timerId = setTimeout(() => {
+            alertToastRuntime.autoHideTimers.delete(key);
+            dismissAlertToast(toast, key, false);
+        }, autoMs);
+        alertToastRuntime.autoHideTimers.set(key, timerId);
     }
 }
 
@@ -2657,9 +3435,7 @@ function showLoading(show, message = 'Loading...') {
     }
 }
 
-function updateProgress(current, total) {
-    showLoading(true, `Loading weather: ${current}/${total}`);
-}
+function updateProgress() {}
 
 function updateDataSourceDisplay(successful, failed) {
     const isSampleData = state.samplingPoints.some(p => p.weatherData?.source === 'sample-data');
@@ -2683,25 +3459,50 @@ function updateLastUpdateTime() {
 function updateCoralGablesLiveDisplay() {
     const w = state.coralGablesLiveWeather;
     const tempEl = document.getElementById('cgLiveTemp');
+    const tempHeaderEl = document.getElementById('cgLiveTempHeader');
     const condEl = document.getElementById('cgLiveCondition');
+    const windEl = document.getElementById('cgLiveWind');
     const srcEl = document.getElementById('cgLiveSource');
     if (!tempEl || !condEl) {
         return;
     }
     if (!w || typeof w.temperature !== 'number') {
         tempEl.textContent = '--°F';
+        if (tempHeaderEl) {
+            tempHeaderEl.textContent = '--°F';
+        }
         condEl.textContent = '—';
+        if (windEl) {
+            windEl.textContent = 'Wind: —';
+        }
         if (srcEl) {
             srcEl.textContent = '';
         }
         return;
     }
-    tempEl.textContent = `${Math.round(w.temperature)}°F`;
+    const tempStr = `${Math.round(w.temperature)}°F`;
+    tempEl.textContent = tempStr;
+    if (tempHeaderEl) {
+        tempHeaderEl.textContent = tempStr;
+    }
     const cond =
         (typeof w.weatherDescription === 'string' && w.weatherDescription.trim()) ||
         (typeof w.weather === 'string' && w.weather.trim()) ||
         '—';
     condEl.textContent = cond;
+    if (windEl) {
+        if (
+            typeof w.windSpeed === 'number' &&
+            Number.isFinite(w.windSpeed) &&
+            typeof w.windDirection === 'number' &&
+            Number.isFinite(w.windDirection)
+        ) {
+            const comp = windDirectionToCompass16(w.windDirection);
+            windEl.textContent = `Wind: ${w.windSpeed.toFixed(1)} mph from ${comp}`;
+        } else {
+            windEl.textContent = 'Wind: —';
+        }
+    }
     if (srcEl) {
         const raw = w.sources || w.source || '';
         srcEl.textContent = raw ? `Sources: ${raw}` : '';
@@ -2715,22 +3516,8 @@ function updateSnapshotCount() {
     }
 }
 
-function showAlert(alert) {
-    const banner = document.getElementById('alertBanner');
-    const content = document.getElementById('alertContent');
-    
-    content.textContent = alert.headline || alert.event;
-    banner.className = 'alert-banner';
-    
-    if (alert.severity === 'Moderate') banner.classList.add('warning');
-    else if (alert.severity === 'Minor') banner.classList.add('advisory');
-    
-    banner.classList.remove('hidden');
-}
-
 function showError(message) {
-    console.error(message);
-    debugLog('✗ ' + message, true);
+    debugLog(message, true);
 }
 
 function swapSplitViews() {
@@ -2745,21 +3532,81 @@ function swapSplitViews() {
 }
 
 /**
- * Debug logging
+ * Camera pose for terminal debug. Global scenes: x = longitude (°), y = latitude (°), z = eye altitude (m).
+ * Local/projected views fall back to map x/y/z.
+ */
+function formatSceneCameraPositionLine(camera) {
+    if (!camera || !camera.position) {
+        return null;
+    }
+    const p = camera.position;
+    const h = typeof camera.heading === 'number' && Number.isFinite(camera.heading) ? camera.heading : null;
+    const t = typeof camera.tilt === 'number' && Number.isFinite(camera.tilt) ? camera.tilt : null;
+    const ht = (h != null ? ` h=${h.toFixed(1)}°` : '') + (t != null ? ` t=${t.toFixed(1)}°` : '');
+    if (p.longitude != null && p.latitude != null) {
+        const x = Number(p.longitude);
+        const y = Number(p.latitude);
+        const z = typeof p.z === 'number' && Number.isFinite(p.z) ? p.z : 0;
+        return `camera x=${x.toFixed(6)}° y=${y.toFixed(6)}° z=${z.toFixed(1)}m${ht}`;
+    }
+    const x = typeof p.x === 'number' ? p.x : 0;
+    const y = typeof p.y === 'number' ? p.y : 0;
+    const z = typeof p.z === 'number' && Number.isFinite(p.z) ? p.z : 0;
+    return `camera x=${x.toFixed(2)} y=${y.toFixed(2)} z=${z.toFixed(2)} (map units)${ht}`;
+}
+
+/**
+ * Throttled logging of SceneView camera to the dev server terminal (`POST /__debug_log`, see vite.config.js).
+ */
+function wireSceneCameraDebugToTerminal(sceneView) {
+    if (!CONFIG.CAMERA_DEBUG_LOG_ENABLED || !sceneView || typeof sceneView.watch !== 'function') {
+        return;
+    }
+    try {
+        if (state.cameraDebugWatchHandle && typeof state.cameraDebugWatchHandle.remove === 'function') {
+            state.cameraDebugWatchHandle.remove();
+            state.cameraDebugWatchHandle = null;
+        }
+    } catch (e) {
+        /* ignore */
+    }
+    const interval = Math.max(50, Number(CONFIG.CAMERA_DEBUG_LOG_INTERVAL_MS) || 200);
+    let lastEmit = 0;
+    state.cameraDebugWatchHandle = sceneView.watch('camera', () => {
+        const cam = sceneView.camera;
+        const now = Date.now();
+        if (now - lastEmit < interval) {
+            return;
+        }
+        lastEmit = now;
+        const line = formatSceneCameraPositionLine(cam);
+        if (line) {
+            debugLog(line);
+        }
+    });
+}
+
+/**
+ * Debug logging — browser console + terminal when using Vite dev or preview (`run.sh` uses preview).
  */
 function debugLog(message, isError = false) {
-    console.log(message);
-    
-    const debugOutput = document.getElementById('debugOutput');
-    if (debugOutput) {
-        const div = document.createElement('div');
-        div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-        div.style.color = isError ? '#ff6b6b' : '#ffffff';
-        div.style.fontSize = '11px';
-        div.style.margin = '2px 0';
-        debugOutput.appendChild(div);
-        debugOutput.scrollTop = debugOutput.scrollHeight;
+    const line = `[${new Date().toLocaleTimeString()}] ${message}`;
+    if (isError) {
+        console.error(line);
+    } else {
+        console.log(line);
     }
+    if (typeof fetch === 'undefined') {
+        return;
+    }
+    fetch('/__debug_log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ line, isError }),
+        keepalive: true
+    }).catch(() => {
+        /* no local server or static host — ignore */
+    });
 }
 
 // Initialize on load
@@ -2768,13 +3615,3 @@ if (document.readyState === 'loading') {
 } else {
     init();
 }
-
-// Debug keyboard shortcut (press 'd' to toggle debug console)
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'd' || e.key === 'D') {
-        const debugConsole = document.getElementById('debugConsole');
-        if (debugConsole) {
-            debugConsole.classList.toggle('hidden');
-        }
-    }
-});

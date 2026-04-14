@@ -62,12 +62,24 @@ export const CONFIG = {
      * fits GRID_EXTENT. Very high views can suppress weather visibility in the SDK.
      */
     SCENE_INITIAL_CAMERA_Z_METERS: 1200,
+    /**
+     * Fixed opening camera (lon/lat °, z m, heading/tilt °). When fully set, used for SceneView at startup
+     * and automatic extent framing is skipped. Remove or set to null to frame GRID_EXTENT again.
+     */
+    SCENE_INITIAL_CAMERA: {
+        longitude: -80.358296,
+        latitude: 25.598559,
+        z: 4105.7,
+        heading: 34.0,
+        tilt: 78.9
+    },
     /** Esri Weather widget on the map (off = widget stays headless; scene still follows API via code). */
     SCENE_ESRI_WEATHER_WIDGET: false,
 
     /**
      * On load, frame the camera to GRID_EXTENT and wait for tiles/scene to finish updating
      * so Coral Gables is fully drawn before interaction (avoids streaming while panning).
+     * Ignored when `SCENE_INITIAL_CAMERA` defines a full preset (see main.js).
      */
     SCENE_FRAME_FULL_EXTENT_ON_LOAD: true,
     /**
@@ -86,7 +98,14 @@ export const CONFIG = {
     SCENE_INITIAL_GO_TO_TILT: 56,
     /** Max time to wait for view.updating to settle after framing (ms) */
     SCENE_INITIAL_LOAD_MAX_WAIT_MS: 60000,
-    
+    /**
+     * While true, moving the SceneView logs camera x/y/z to the dev server terminal (`run.sh` / Vite → POST /__debug_log).
+     * Geographic scenes: x = longitude (°), y = latitude (°), z = eye altitude (m). Also logs heading & tilt (°).
+     */
+    CAMERA_DEBUG_LOG_ENABLED: false,
+    /** Minimum ms between camera lines (throttle; keeps terminal readable while orbiting). */
+    CAMERA_DEBUG_LOG_INTERVAL_MS: 200,
+
     // Weather API — optional OpenWeatherMap (from `.env` via Vite); Open-Meteo + NOAA work without it
     OPENWEATHERMAP_API_KEY: OPENWEATHERMAP_API_KEY_FROM_ENV,
     
@@ -113,7 +132,7 @@ export const CONFIG = {
     TOTAL_SAMPLING_POINTS: 17,
     
     // Refresh Intervals (in milliseconds)
-    WEATHER_REFRESH_INTERVAL: 5 * 60 * 1000, // 5 minutes
+    WEATHER_REFRESH_INTERVAL: 2 * 60 * 1000, // 2 minutes
     ALERT_REFRESH_INTERVAL: 2 * 60 * 1000,    // 2 minutes
     
     // Historical Data Configuration
@@ -129,11 +148,77 @@ export const CONFIG = {
     GRID_BASE_ELEVATION_METERS: 320,
     // Treat near-uniform fields as flat at mid-relief (avoid divide-by-zero)
     GRID_TEMP_RANGE_EPSILON: 1e-6,
+
+    /**
+     * Default grid look: `gulf-glass` | `basic-grid` (legend temp colors) | `tidefield-membrane` (wow).
+     * The control panel + localStorage override this after first visit.
+     */
+    MAP_VISUAL_STYLE: 'gulf-glass',
+
+    /** Gulf Glass — low fill/outline alpha so the basemap reads through the mesh. */
+    GULF_GLASS_GRID_FILL_ALPHA: 14,
+    GULF_GLASS_GRID_OUTLINE_ALPHA: 92,
+    GULF_GLASS_BEACON_SIZE: 12,
+    /** Ring around station dots — UI scan green family */
+    GULF_GLASS_BEACON_OUTLINE: [52, 198, 118, 232],
+    GULF_GLASS_BEACON_Z_METERS: 48,
+
+    /**
+     * Tidefield Membrane — only when MAP_VISUAL_STYLE / UI = `tidefield-membrane`:
+     * micro-ripples, pulse, station tethers. Loading sweep is the shared CSS overlay (`#refreshScanOverlay`).
+     */
+    TIDEfield_GRID_FILL_ALPHA: 18,
+    TIDEfield_GRID_OUTLINE_ALPHA: 110,
+    TIDEfield_BEACON_SIZE: 15,
+    /** [r, g, b, a] ring around sampling points — bright green on dark scene */
+    TIDEfield_BEACON_OUTLINE: [72, 228, 150, 255],
+    TIDEfield_BEACON_Z_METERS: 52,
+    TIDEfield_RIPPLE_METERS: 22,
+    TIDEfield_RIPPLE_SPATIAL_FREQ: 0.0009,
+    TIDEfield_RIPPLE_SPEED: 1.2,
+    TIDEfield_PULSE_DURATION_MS: 2600,
+    TIDEfield_PULSE_STRENGTH: 1.45,
+    TIDEfield_TETHERS_ENABLED: true,
+    TIDEfield_TETHER_Z_BOTTOM: 32,
+    TIDEfield_TETHER_Z_TOP: null,
+    TIDEfield_TETHER_COLOR: [34, 190, 96, 175],
+    TIDEfield_TETHER_WIDTH: 1.35,
+    /**
+     * While weather is fetching, CSS overlay sweep: one leg = left → right across the viewport (ms).
+     * Repeats with `animation-iteration-count: infinite` (no reverse pass).
+     */
+    WEATHER_LOADING_SCAN_LEG_DURATION_MS: 6800,
+    /** [r, g, b, a] — `#refreshScanOverlay` sweep (all grid looks; Tidefield no longer draws a 3D scan band) */
+    TIDEfield_SCAN_COLOR: [34, 190, 96, 82],
+
+    /** Wind arrows (mph): bucket max speeds, then `WIND_VECTOR_COLORS`[0..3] calm → severe */
+    WIND_VECTOR_SPEED_BREAKS_MPH: [10, 20, 30],
+    WIND_VECTOR_COLORS: [
+        [24, 128, 118, 208],
+        [42, 188, 108, 228],
+        [218, 148, 72, 236],
+        [232, 102, 78, 246]
+    ],
+    /** Scene z (m) and max geodesic-ish span (deg) for Coral Gables live wind arrow */
+    CORAL_GABLES_WIND_ARROW_Z_METERS: 440,
+    CORAL_GABLES_WIND_ARROW_MAX_LEN_DEG: 0.016,
+
+    /** Basic grid — station fill / ring (outline-only mesh; beacons read on dark basemap) */
+    BASIC_GRID_BEACON_FILL: [24, 32, 42, 250],
+    BASIC_GRID_BEACON_OUTLINE: [46, 188, 108, 255],
+
+    /** Basic grid + loading placeholder — outline only; keep edges soft so tiles show through. */
+    BASIC_GRID_OUTLINE_ALPHA: 118,
     
     // Animation Configuration
     DEFORMATION_ANIMATION_DURATION: 2000, // milliseconds
     PLAYBACK_SPEEDS: [1, 2, 4],
     
+    /** NWS alert toasts: auto-dismiss and max stacked pop-ups */
+    ALERT_TOAST_AUTO_DISMISS_MS: 9000,
+    ALERT_TOAST_MAX_VISIBLE: 3,
+    ALERT_TOAST_EXIT_MS: 420,
+
     // Alert Thresholds
     TEMP_GRADIENT_THRESHOLD: 15, // °F difference across grid
     TEMP_CHANGE_RATE_THRESHOLD: 5, // °F per hour
@@ -160,14 +245,15 @@ export const SAMPLING_PATTERNS = {
     MID_LAYER: 2
 };
 
-// Color gradients for temperature visualization
+/**
+ * Temperature legend + grid tinting (all grid looks use this scale).
+ * Four stops — cool dark green → teal → emerald → hot amber (borders stay green, not blue).
+ */
 export const TEMP_COLOR_GRADIENT = [
-    { temp: -10, color: [0, 0, 255] },      // Deep blue
-    { temp: 32, color: [0, 255, 255] },     // Cyan
-    { temp: 60, color: [0, 255, 0] },       // Green
-    { temp: 80, color: [255, 255, 0] },     // Yellow
-    { temp: 100, color: [255, 165, 0] },    // Orange
-    { temp: 120, color: [255, 0, 0] }       // Red
+    { temp: 40, color: [24, 56, 46] },
+    { temp: 55, color: [22, 112, 88] },
+    { temp: 72, color: [46, 188, 108] },
+    { temp: 90, color: [245, 148, 72] }
 ];
 
 // Weather condition icons/symbols
