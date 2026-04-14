@@ -79,7 +79,6 @@ The app is meant to give residents, students, and curious users a **spatial** vi
 | `USER_MANUAL.md`  | End-user controls and troubleshooting        |
 | `API.md`          | External APIs, endpoints, merge, trust notes |
 | `DEPLOY.md`       | Static hosting checklist                     |
-| `CONTRIBUTING.md` | Issues, PRs, checks                          |
 | `SECURITY.md`     | Client-side keys, reporting                  |
 | `ARCHITECTURE.md` | Data flow and modules                        |
 
