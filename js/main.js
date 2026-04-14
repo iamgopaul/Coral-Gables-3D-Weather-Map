@@ -1534,7 +1534,8 @@ function getLegendTempBounds(samplingPoints, gridCells) {
 }
 
 /**
- * Gulf Glass: soften cell outline by lerping temp color toward a pale sea-glass highlight (less “rainbow wire”).
+ * Sea-glass cell outline: lerp temp RGB toward a pale mint highlight (less “rainbow wire”).
+ * Used for Gulf Glass and Tidefield Membrane grid fills (`GULF_GLASS_OUTLINE_BLEND` / `GULF_GLASS_OUTLINE_HIGHLIGHT_RGB`).
  * @param {number[]} cellRgb
  * @returns {number[]}
  */
@@ -1671,9 +1672,7 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
                         const basicOutlineA = CONFIG.BASIC_GRID_OUTLINE_ALPHA ?? 118;
                         const pointFillAlpha = basic
                             ? 250
-                            : tide
-                              ? 228
-                              : CONFIG.GULF_GLASS_BEACON_FILL_ALPHA ?? 232;
+                            : CONFIG.GULF_GLASS_BEACON_FILL_ALPHA ?? 232;
                         const graphic = new Graphic({
                 geometry: new Point({
                     longitude: point.longitude,
@@ -1682,14 +1681,16 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
                 }),
                 symbol: new SimpleMarkerSymbol({
                     color: basic ? [...rgb, 250] : [...rgb, pointFillAlpha],
-                    size: basic ? 12 : tide ? (CONFIG.TIDEfield_BEACON_SIZE ?? 14) : (CONFIG.GULF_GLASS_BEACON_SIZE ?? 12),
+                    size: basic
+                        ? 12
+                        : tide
+                          ? CONFIG.TIDEfield_BEACON_SIZE ?? CONFIG.GULF_GLASS_BEACON_SIZE ?? 12
+                          : CONFIG.GULF_GLASS_BEACON_SIZE ?? 12,
                     outline: {
                         color: basic
                             ? [...rgb, basicOutlineA]
-                            : tide
-                              ? (CONFIG.TIDEfield_BEACON_OUTLINE || [72, 228, 150, 255])
-                              : (CONFIG.GULF_GLASS_BEACON_OUTLINE || [52, 198, 118, 232]),
-                        width: basic ? 2 : tide ? 2.5 : 2
+                            : CONFIG.GULF_GLASS_BEACON_OUTLINE || [52, 198, 118, 232],
+                        width: basic ? 2 : 2
                     }
                 }),
                 attributes: {
@@ -1801,9 +1802,9 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
             });
 
                     const outlineRgb =
-                        hasData && gulfGlass ? gulfGlassOutlineRgb(color) : color;
+                        hasData && (gulfGlass || tide) ? gulfGlassOutlineRgb(color) : color;
                     const outlineW = tide
-                        ? 1.75
+                        ? CONFIG.TIDEfield_GRID_OUTLINE_WIDTH ?? CONFIG.GULF_GLASS_GRID_OUTLINE_WIDTH ?? 1.35
                         : basic
                           ? 2
                           : gulfGlass

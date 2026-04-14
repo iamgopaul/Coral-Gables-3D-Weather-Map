@@ -197,13 +197,15 @@ export const CONFIG = {
 
     /**
      * Tidefield Membrane — only when MAP_VISUAL_STYLE / UI = `tidefield-membrane`:
-     * micro-ripples, pulse, station tethers. Loading sweep is the shared CSS overlay (`#refreshScanOverlay`).
+     * micro-ripples, pulse, station tethers. Mesh outline uses the same sea-glass lerp as Gulf Glass
+     * (`GULF_GLASS_OUTLINE_*`). Loading sweep is the shared CSS overlay (`#refreshScanOverlay`).
      */
-    TIDEfield_GRID_FILL_ALPHA: 18,
-    TIDEfield_GRID_OUTLINE_ALPHA: 110,
-    TIDEfield_BEACON_SIZE: 15,
-    /** [r, g, b, a] ring around sampling points — bright green on dark scene */
-    TIDEfield_BEACON_OUTLINE: [72, 228, 150, 255],
+    TIDEfield_GRID_FILL_ALPHA: 22,
+    TIDEfield_GRID_OUTLINE_ALPHA: 108,
+    /** Same family as `GULF_GLASS_GRID_OUTLINE_WIDTH` — thin wire, less noise over the membrane. */
+    TIDEfield_GRID_OUTLINE_WIDTH: 1.35,
+    /** Slightly larger than Gulf Glass beacons so stations stay readable over ripples; ring uses `GULF_GLASS_BEACON_OUTLINE`. */
+    TIDEfield_BEACON_SIZE: 13,
     TIDEfield_BEACON_Z_METERS: 52,
     TIDEfield_RIPPLE_METERS: 22,
     TIDEfield_RIPPLE_SPATIAL_FREQ: 0.0009,
