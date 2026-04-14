@@ -102,6 +102,138 @@ export function buildSnapshotsFromHistoricalHourly(batchResults, retentionMs, no
 }
 
 /**
+ * Slider 0–100 maps linearly across wall time `[nowMs - retentionMs, nowMs]`, then picks the
+ * snapshot whose `timestamp` is closest (same rule as {@link getSnapshotAtTime}).
+ * @param {object[]} snapshots — sorted ascending by `timestamp` (typical playback list)
+ * @param {number} sliderPercent — 0–100 from `<input type="range">`
+ * @param {number} retentionMs
+ * @param {number} [nowMs=Date.now()]
+ * @returns {number} index into `snapshots`
+ */
+export function getSnapshotIndexForTimelineSlider(snapshots, sliderPercent, retentionMs, nowMs = Date.now()) {
+    if (!snapshots || snapshots.length === 0) {
+        return 0;
+    }
+    if (snapshots.length === 1) {
+        return 0;
+    }
+    const p = Math.max(0, Math.min(100, Number(sliderPercent))) / 100;
+    const ret = Number(retentionMs);
+    if (!Number.isFinite(ret) || ret <= 0) {
+        return Math.round(p * (snapshots.length - 1));
+    }
+    const minT = nowMs - ret;
+    const targetT = minT + p * ret;
+    const snap = getSnapshotAtTime(snapshots, targetT);
+    if (!snap) {
+        return snapshots.length - 1;
+    }
+    const idx = snapshots.indexOf(snap);
+    return idx >= 0 ? idx : snapshots.length - 1;
+}
+
+/**
+ * Where a snapshot sits on the 0–100 slider for a fixed `[now - retention, now]` window.
+ * @param {{ timestamp?: number }} snapshot
+ * @param {number} retentionMs
+ * @param {number} [nowMs=Date.now()]
+ * @returns {number} 0–100
+ */
+export function getTimelineSliderPercentForSnapshot(snapshot, retentionMs, nowMs = Date.now()) {
+    const ts = Number(snapshot?.timestamp);
+    const ret = Number(retentionMs);
+    if (!Number.isFinite(ts) || !Number.isFinite(ret) || ret <= 0) {
+        return 100;
+    }
+    const minT = nowMs - ret;
+    const pct = ((ts - minT) / ret) * 100;
+    return Math.max(0, Math.min(100, pct));
+}
+
+/**
+ * Keep only frames with `timestamp` in `[nowMs - retentionMs, nowMs]` (48h window ending at **now**).
+ * @param {object[]} snapshots
+ * @param {number} retentionMs
+ * @param {number} [nowMs=Date.now()]
+ */
+export function clipSnapshotsToRetentionWindow(snapshots, retentionMs, nowMs = Date.now()) {
+    if (!Array.isArray(snapshots) || snapshots.length === 0) {
+        return [];
+    }
+    const ret = Number(retentionMs);
+    const now = Number(nowMs);
+    if (!Number.isFinite(ret) || ret <= 0 || !Number.isFinite(now)) {
+        return snapshots.slice();
+    }
+    const minT = now - ret;
+    return snapshots.filter((s) => {
+        const t = Number(s?.timestamp);
+        return Number.isFinite(t) && t >= minT && t <= now;
+    });
+}
+
+/**
+ * Append one frame at `nowMs` using live `samplingPoints` weather so the timeline ends at **current**,
+ * when the last stored frame is older than `minGapMs` (e.g. hourly rows end at last full hour).
+ * @param {object[]} snapshots — ascending by `timestamp`
+ * @param {object[]} samplingPoints — `{ id, latitude, longitude, weatherData }`
+ * @param {{ nowMs?: number, minGapMs?: number }} [opts]
+ */
+export function appendLiveNowSnapshotIfStale(snapshots, samplingPoints, opts = {}) {
+    const nowMs = opts.nowMs != null ? Number(opts.nowMs) : Date.now();
+    const minGapMs = opts.minGapMs != null ? Math.max(0, Number(opts.minGapMs)) : 120_000;
+    const list = Array.isArray(snapshots) ? snapshots.slice() : [];
+    if (list.length === 0 || !Array.isArray(samplingPoints) || samplingPoints.length === 0) {
+        return list;
+    }
+    const last = list[list.length - 1];
+    const lastTs = Number(last?.timestamp);
+    if (Number.isFinite(lastTs) && nowMs - lastTs < minGapMs) {
+        return list;
+    }
+
+    const data = [];
+    for (const p of samplingPoints) {
+        if (!p || !p.weatherData || p.weatherData.error) {
+            continue;
+        }
+        const wd = p.weatherData;
+        data.push({
+            pointId: p.id,
+            latitude: p.latitude,
+            longitude: p.longitude,
+            success: true,
+            temperature: wd.temperature,
+            feelsLike: wd.feelsLike,
+            humidity: wd.humidity,
+            pressure: wd.pressure,
+            windSpeed: wd.windSpeed,
+            windDirection: wd.windDirection,
+            windGust: wd.windGust,
+            precipitation: wd.precipitation,
+            weather: wd.weather,
+            weatherDescription: wd.weatherDescription,
+            source: wd.source
+        });
+    }
+    if (data.length === 0) {
+        return list;
+    }
+    list.push({ timestamp: nowMs, data });
+    return list;
+}
+
+/**
+ * Clip to `[now - retention, now]`, append live **now** if needed, clip again, sort ascending.
+ */
+export function finalizePlaybackSnapshots(snapshots, samplingPoints, retentionMs, nowMs = Date.now()) {
+    let s = clipSnapshotsToRetentionWindow(snapshots, retentionMs, nowMs);
+    s = appendLiveNowSnapshotIfStale(s, samplingPoints, { nowMs, minGapMs: 120_000 });
+    s = clipSnapshotsToRetentionWindow(s, retentionMs, nowMs);
+    return s.sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+}
+
+/**
  * Get snapshot at specific timestamp
  */
 export function getSnapshotAtTime(snapshots, targetTimestamp) {

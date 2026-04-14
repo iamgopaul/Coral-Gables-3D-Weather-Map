@@ -54,17 +54,17 @@ flowchart LR
 
 ## Major modules
 
-| Path                                                  | Responsibility                                                                                                                                    |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `js/main.js`                                          | App state, ArcGIS SceneView init, UI wiring, refresh pipeline, modes (current / forecast / historical / split), `debugLog`, global error handlers |
-| `js/config.js`                                        | Constants: grid extent, API URLs, scene, refresh intervals                                                                                        |
-| `js/api/weatherService.js`                            | Merge priorities, batch fetches (`fetchBatchWeather`, `fetchBatchForecast`, `fetchBatchHistoricalHourly`), forecast selection + enrichment        |
-| `js/api/noaa.js`, `openmeteo.js`, `openweathermap.js` | Provider-specific `fetch` + parse (`openmeteo.js` includes hourly past window for historical playback)                                            |
-| `js/features/timeFeatures.js`                         | `getForecastData`, `buildSnapshotsFromHistoricalHourly`, `PlaybackController`, IndexedDB snapshot helpers                                         |
-| `js/storage/db.js`                                    | IndexedDB read/write                                                                                                                              |
-| `js/viz/wind.js`                                      | Wind vectors and area-mean wind graphic                                                                                                           |
-| `js/utils/interpolation.js`                           | IDW and grid interpolation                                                                                                                        |
-| `vite.config.js`                                      | Build; dev/preview middleware for **`/__debug_log`**                                                                                              |
+| Path                                                  | Responsibility                                                                                                                                           |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `js/main.js`                                          | App state, ArcGIS SceneView init, UI wiring, refresh pipeline, modes (current / forecast / historical / split), `debugLog`, global error handlers        |
+| `js/config.js`                                        | Constants: grid extent, API URLs, scene, refresh intervals                                                                                               |
+| `js/api/weatherService.js`                            | Merge priorities, batch fetches (`fetchBatchWeather`, `fetchBatchForecast`, `fetchBatchHistoricalHourly`), forecast selection + enrichment               |
+| `js/api/noaa.js`, `openmeteo.js`, `openweathermap.js` | Provider-specific `fetch` + parse (`openmeteo.js` includes hourly past window for historical playback)                                                   |
+| `js/features/timeFeatures.js`                         | `getForecastData`, `buildSnapshotsFromHistoricalHourly`, `finalizePlaybackSnapshots`, wall-clock slider helpers, `PlaybackController`, IndexedDB helpers |
+| `js/storage/db.js`                                    | IndexedDB read/write                                                                                                                                     |
+| `js/viz/wind.js`                                      | Wind vectors and area-mean wind graphic                                                                                                                  |
+| `js/utils/interpolation.js`                           | IDW and grid interpolation                                                                                                                               |
+| `vite.config.js`                                      | Build; dev/preview middleware for **`/__debug_log`**                                                                                                     |
 
 ## View modes (where logic splits)
 

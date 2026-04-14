@@ -4,8 +4,72 @@ import {
     getForecastData,
     formatTimestamp,
     interpolateSnapshots,
-    buildSnapshotsFromHistoricalHourly
+    buildSnapshotsFromHistoricalHourly,
+    getSnapshotIndexForTimelineSlider,
+    getTimelineSliderPercentForSnapshot,
+    clipSnapshotsToRetentionWindow,
+    finalizePlaybackSnapshots
 } from '../js/features/timeFeatures.js';
+
+describe('clipSnapshotsToRetentionWindow', () => {
+    it('keeps only frames between now-retention and now', () => {
+        const now = 1_000_000;
+        const ret = 100_000;
+        const snaps = [
+            { timestamp: now - ret - 1, data: [] },
+            { timestamp: now - ret + 1, data: [] },
+            { timestamp: now, data: [] },
+            { timestamp: now + 1, data: [] }
+        ];
+        const out = clipSnapshotsToRetentionWindow(snaps, ret, now);
+        expect(out).toHaveLength(2);
+        expect(out[0].timestamp).toBe(now - ret + 1);
+        expect(out[1].timestamp).toBe(now);
+    });
+});
+
+describe('finalizePlaybackSnapshots', () => {
+    it('appends live now when last frame is older than min gap', () => {
+        const now = 5_000_000;
+        const ret = 200_000;
+        const snaps = [{ timestamp: now - 200_000, data: [{ pointId: 'a', success: true, temperature: 1 }] }];
+        const points = [
+            {
+                id: 'a',
+                latitude: 1,
+                longitude: 2,
+                weatherData: { temperature: 99, humidity: 50, windSpeed: 1, pressure: 1000, error: false }
+            }
+        ];
+        const out = finalizePlaybackSnapshots(snaps, points, ret, now);
+        expect(out[out.length - 1].timestamp).toBe(now);
+        expect(out[out.length - 1].data[0].temperature).toBe(99);
+    });
+});
+
+describe('timeline slider (wall clock)', () => {
+    const retention = 48 * 3600000;
+
+    it('maps slider 0 to oldest frame in window and 100 to newest by timestamp', () => {
+        const now = 10_000_000;
+        const snaps = [
+            { timestamp: now - retention + 3600000, data: [] },
+            { timestamp: now - retention + 24 * 3600000, data: [] },
+            { timestamp: now - 1000, data: [] }
+        ];
+        expect(getSnapshotIndexForTimelineSlider(snaps, 0, retention, now)).toBe(0);
+        expect(getSnapshotIndexForTimelineSlider(snaps, 100, retention, now)).toBe(2);
+        const mid = getSnapshotIndexForTimelineSlider(snaps, 50, retention, now);
+        expect(mid).toBe(1);
+    });
+
+    it('maps snapshot timestamp to slider percent', () => {
+        const now = 10_000_000;
+        const snap = { timestamp: now - retention / 2 };
+        expect(getTimelineSliderPercentForSnapshot(snap, retention, now)).toBeCloseTo(50, 5);
+        expect(getTimelineSliderPercentForSnapshot({ timestamp: now }, retention, now)).toBe(100);
+    });
+});
 
 describe('getSnapshotAtTime', () => {
     it('returns null for empty or invalid target', () => {

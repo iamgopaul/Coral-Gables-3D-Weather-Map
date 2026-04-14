@@ -1369,6 +1369,12 @@ async function persistWeatherSnapshotAndReloadHistory(weatherResults) {
             const prevIdx = state.playbackController?.getCurrentIndex?.();
             const ok = await hydrateHistoricalSnapshotsFromApi({ preservePlaybackIndex: prevIdx });
             if (!ok) {
+                state.historicalSnapshots = TimeFeatures.finalizePlaybackSnapshots(
+                    state.historicalSnapshots,
+                    state.samplingPoints,
+                    CONFIG.HISTORICAL_DATA_RETENTION
+                );
+                updateSnapshotCount();
                 rebindHistoricalPlaybackController(prevIdx);
             }
         }
@@ -1394,7 +1400,7 @@ async function hydrateHistoricalSnapshotsFromApi(options = {}) {
         const batch = await WeatherService.fetchBatchHistoricalHourly(state.samplingPoints, (cur, tot) => {
             debugLog(`Historical hourly fetch ${cur}/${tot}`);
         });
-        const snapshots = TimeFeatures.buildSnapshotsFromHistoricalHourly(
+        let snapshots = TimeFeatures.buildSnapshotsFromHistoricalHourly(
             batch,
             CONFIG.HISTORICAL_DATA_RETENTION
         );
@@ -1402,6 +1408,11 @@ async function hydrateHistoricalSnapshotsFromApi(options = {}) {
             debugLog('⚠ Open-Meteo hourly did not yield aligned frames; will fall back to stored snapshots');
             return false;
         }
+        snapshots = TimeFeatures.finalizePlaybackSnapshots(
+            snapshots,
+            state.samplingPoints,
+            CONFIG.HISTORICAL_DATA_RETENTION
+        );
         state.historicalSnapshots = snapshots;
         updateSnapshotCount();
         rebindHistoricalPlaybackController(
@@ -2441,6 +2452,11 @@ async function initializePlayback() {
     if (!usedApi) {
         try {
             state.historicalSnapshots = await TimeFeatures.getHistoricalSnapshots();
+            state.historicalSnapshots = TimeFeatures.finalizePlaybackSnapshots(
+                state.historicalSnapshots,
+                state.samplingPoints,
+                CONFIG.HISTORICAL_DATA_RETENTION
+            );
             updateSnapshotCount();
         } catch (e) {
             console.warn('[playback] failed to load historical snapshots:', e);
@@ -3291,8 +3307,12 @@ function seekPlayback(value) {
 
     const n = state.historicalSnapshots.length;
     if (n === 0) return;
-    const maxIdx = n - 1;
-    const index = maxIdx === 0 ? 0 : Math.round((value / 100) * maxIdx);
+    const pct = typeof value === 'number' ? value : parseInt(String(value), 10);
+    const index = TimeFeatures.getSnapshotIndexForTimelineSlider(
+        state.historicalSnapshots,
+        pct,
+        CONFIG.HISTORICAL_DATA_RETENTION
+    );
     state.playbackController.seek(index);
 }
 
@@ -3311,7 +3331,9 @@ function updatePlaybackUI(snapshot, index, total) {
         if (total === 1) {
             sliderEl.value = '100';
         } else {
-            sliderEl.value = String((index / (total - 1)) * 100);
+            sliderEl.value = String(
+                TimeFeatures.getTimelineSliderPercentForSnapshot(snapshot, CONFIG.HISTORICAL_DATA_RETENTION)
+            );
         }
     }
 }

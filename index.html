@@ -197,7 +197,7 @@
 
                         <!-- Historical Playback Controls -->
                         <div id="playbackControls" class="control-group hidden">
-                            <label>Timeline (Last 48 Hours):</label>
+                            <label for="timelineSlider">Timeline: 48h ago → now</label>
                             <input type="range" id="timelineSlider" min="0" max="100" value="100" />
                             <div class="playback-buttons">
                                 <button id="playBtn">▶ Play</button>
@@ -210,7 +210,13 @@
                             </div>
                             <div id="currentTimestamp"></div>
                             <div class="timeline-info">
-                                <small>Snapshots: <span id="snapshotCount">0</span></small>
+                                <small
+                                    >Frames: <span id="snapshotCount">0</span> · slider
+                                    <strong>left = 48 hours before now</strong>,
+                                    <strong>right = current</strong> (live grid when the last hourly row is
+                                    older than ~2 min). Open-Meteo hourly between; saved refreshes only if
+                                    hourly unavailable.</small
+                                >
                             </div>
                         </div>
 

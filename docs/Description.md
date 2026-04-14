@@ -1,6 +1,6 @@
 # Project description — Coral Gables Weather Grid
 
-**The Coral Gables Weather Radar** is a browser-based **3D weather visualization** focused on **Coral Gables, Florida**. It combines a public **ArcGIS** city scene with **live and forecast weather** from multiple public APIs, a **station grid** with interpolated conditions, **wind arrows**, **historical playback** over roughly the **last 48 hours** (hourly Open-Meteo backfill, with local snapshot fallback), and **National Weather Service** alerts.
+**The Coral Gables Weather Radar** is a browser-based **3D weather visualization** focused on **Coral Gables, Florida**. It combines a public **ArcGIS** city scene with **live and forecast weather** from multiple public APIs, a **station grid** with interpolated conditions, **wind arrows**, **historical playback** on a fixed wall-time window **from 48 hours ago through the current moment** (Open-Meteo hourly UTC backfill plus a live **now** frame when needed, with IndexedDB fallback), and **National Weather Service** alerts.
 
 This document is a **high-level product overview** of what the project **is** and **does today**. For setup, scripts, and repo layout, see **`../README.md`**. For external services, merge rules, and trust notes, see **`API.md`**.
 
@@ -32,7 +32,7 @@ The app is meant to give residents, students, and curious users a **spatial** vi
 
 - **Current** — Latest merged conditions and interpolated grid.
 - **Forecast** — Same grid logic using forecast periods at the chosen offset.
-- **Historical** — Loads **hourly frames** for the retention window (typically ~48 hours) by requesting **Open-Meteo** hourly series for each station (UTC-aligned, then intersected across the grid). If that fails, playback falls back to **IndexedDB** snapshots saved during earlier refreshes. The timeline slider scrubs those frames (about one per hour when the API path succeeds).
+- **Historical** — Builds a list of frames whose timestamps lie in **`[now − 48h, now]`** (configurable retention). **Open-Meteo** hourly series (UTC, `past_days=2`, intersected across stations) fill most of the window; **`finalizePlaybackSnapshots`** clips to the window and appends the **live grid at `now`** when the last hourly row is more than a couple of minutes old so the **right edge is truly current**. If hourly backfill fails, **IndexedDB** refresh snapshots are used (sparse), with the same clipping and **now** cap. The **slider maps to clock time** across that window, not merely frame index.
 - **Split-screen** — Compare two modes side by side (e.g. current vs forecast) with linked navigation where implemented.
 
 ### Alerts and messaging

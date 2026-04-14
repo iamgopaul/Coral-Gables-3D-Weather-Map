@@ -134,7 +134,7 @@ The **3D map** is built with **ArcGIS Maps SDK for JavaScript** (loaded from CDN
 
 ## Internal: Vite `POST /__debug_log`
 
-**Not** a third-party API. **`vite.config.js`** registers middleware so `debugLog()` in `main.js` can mirror lines to the **terminal** during development and `npm run preview`. It does not affect weather accuracy.
+**Not** a third-party API. **`vite.config.js`** registers middleware so `debugLog()` in `main.js` can mirror lines to the **terminal** during development and `npm run preview`. The client only sends `POST /__debug_log` when the page is served from **localhost / 127.0.0.1** (static production hosts such as Vercel do not implement this path). It does not affect weather accuracy.
 
 ---
 
@@ -143,7 +143,7 @@ The **3D map** is built with **ArcGIS Maps SDK for JavaScript** (loaded from CDN
 1. **Current weather** — Multiple sources are fetched; **`mergeWeatherData`** in `js/api/weatherService.js` picks values per field using **`MERGE_PRIORITY_DEFAULT`** or **`MERGE_PRIORITY_NOAA_FIRST`** for the city center.
 2. **Forecast** — Each location gets parallel forecast calls; the object with the **most periods** is kept, then **pressure** and **wind gust** are filled from other successful responses if missing.
 3. **Grid display** — Station values are **interpolated** (IDW) in `js/utils/interpolation.js`; the map is **not** a full numerical weather model.
-4. **Historical playback** — Prefer **Open-Meteo hourly past** (`fetchBatchHistoricalHourly` → `buildSnapshotsFromHistoricalHourly`); if that yields no frames, use **IndexedDB** snapshots in the same retention window (`timeFeatures.getHistoricalSnapshots`).
+4. **Historical playback** — Prefer **Open-Meteo hourly past** (`fetchBatchHistoricalHourly` → `buildSnapshotsFromHistoricalHourly` → `finalizePlaybackSnapshots` to clip to **`[now − retention, now]`** and append **live “now”** when the last hourly row is stale). If that yields no frames, use **IndexedDB** snapshots (`getHistoricalSnapshots`) through the same finalizer. Open-Meteo calls use **429 retries** and throttled batching (`config.js`).
 
 For a shorter product-oriented summary, see **`../README.md`** → _Forecast & merge_.
 
