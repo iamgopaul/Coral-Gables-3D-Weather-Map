@@ -248,14 +248,14 @@ export const CONFIG = {
     /** Delay after refresh so it follows the welcome toast on first load (ms). */
     MICROCLIMATE_TOAST_DELAY_MS: 3600,
     /** Auto-dismiss for microclimate toast (ms). */
-    MICROCLIMATE_TOAST_AUTO_DISMISS_MS: 12000,
+    MICROCLIMATE_TOAST_AUTO_DISMISS_MS: 60 * 1000,
     /** Friendly “good morning / dress for the weather” toast on first load (ms). */
-    WELCOME_TOAST_AUTO_DISMISS_MS: 14000,
+    WELCOME_TOAST_AUTO_DISMISS_MS: 60 * 1000,
     /**
      * NWS alert toasts: `0` = stay on screen until you dismiss or the alert expires from the API feed
      * (stale toasts are removed automatically when NWS no longer returns them).
      */
-    ALERT_TOAST_AUTO_DISMISS_MS: 0,
+    ALERT_TOAST_AUTO_DISMISS_MS: 60 * 1000,
     /** Max NWS toasts shown; `0` = show all active alerts. */
     ALERT_TOAST_MAX_VISIBLE: 0,
     ALERT_TOAST_EXIT_MS: 420,
@@ -265,7 +265,7 @@ export const CONFIG = {
      */
     LIVE_CONDITION_SUPPLEMENT_ENABLED: true,
     /** `0` = live supplement stays until conditions or NWS coverage change. */
-    LIVE_CONDITION_SUPPLEMENT_AUTO_DISMISS_MS: 0,
+    LIVE_CONDITION_SUPPLEMENT_AUTO_DISMISS_MS: 60 * 1000,
 
     // Alert Thresholds
     TEMP_GRADIENT_THRESHOLD: 15, // °F difference across grid
