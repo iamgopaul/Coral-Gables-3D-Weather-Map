@@ -1534,6 +1534,30 @@ function getLegendTempBounds(samplingPoints, gridCells) {
 }
 
 /**
+ * Gulf Glass: soften cell outline by lerping temp color toward a pale sea-glass highlight (less “rainbow wire”).
+ * @param {number[]} cellRgb
+ * @returns {number[]}
+ */
+function gulfGlassOutlineRgb(cellRgb) {
+    const blend = CONFIG.GULF_GLASS_OUTLINE_BLEND ?? 0;
+    const hi = CONFIG.GULF_GLASS_OUTLINE_HIGHLIGHT_RGB;
+    if (
+        !Array.isArray(cellRgb) ||
+        cellRgb.length < 3 ||
+        !(blend > 0) ||
+        !Array.isArray(hi) ||
+        hi.length < 3
+    ) {
+        return cellRgb;
+    }
+    return [
+        Math.round(cellRgb[0] * (1 - blend) + hi[0] * blend),
+        Math.round(cellRgb[1] * (1 - blend) + hi[1] * blend),
+        Math.round(cellRgb[2] * (1 - blend) + hi[2] * blend)
+    ];
+}
+
+/**
  * Grid cell whose bounds contain the sampling point (same cell the mesh uses for that spot).
  */
 function findGridCellUnderPoint(lon, lat, gridCells) {
@@ -1591,6 +1615,7 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
 
             const tide = isTidefieldMembraneActive();
             const basic = isBasicGridActive();
+            const gulfGlass = !basic && !tide;
             const fillAlpha = tide
                 ? (CONFIG.TIDEfield_GRID_FILL_ALPHA ?? 55)
                 : basic
@@ -1644,6 +1669,11 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
                             ? (CONFIG.TIDEfield_BEACON_Z_METERS ?? 52)
                             : (CONFIG.GULF_GLASS_BEACON_Z_METERS ?? 48);
                         const basicOutlineA = CONFIG.BASIC_GRID_OUTLINE_ALPHA ?? 118;
+                        const pointFillAlpha = basic
+                            ? 250
+                            : tide
+                              ? 228
+                              : CONFIG.GULF_GLASS_BEACON_FILL_ALPHA ?? 232;
                         const graphic = new Graphic({
                 geometry: new Point({
                     longitude: point.longitude,
@@ -1651,7 +1681,7 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
                     z: zBeacon
                 }),
                 symbol: new SimpleMarkerSymbol({
-                    color: basic ? [...rgb, 250] : [...rgb, tide ? 228 : 216],
+                    color: basic ? [...rgb, 250] : [...rgb, pointFillAlpha],
                     size: basic ? 12 : tide ? (CONFIG.TIDEfield_BEACON_SIZE ?? 14) : (CONFIG.GULF_GLASS_BEACON_SIZE ?? 12),
                     outline: {
                         color: basic
@@ -1763,14 +1793,24 @@ function updateVisualization(samplingPoints, gridCells, layersOverride = null, v
                 rings: [ring],
                 spatialReference: { wkid: 4326 }
             });
+
+                    const outlineRgb =
+                        hasData && gulfGlass ? gulfGlassOutlineRgb(color) : color;
+                    const outlineW = tide
+                        ? 1.75
+                        : basic
+                          ? 2
+                          : gulfGlass
+                            ? CONFIG.GULF_GLASS_GRID_OUTLINE_WIDTH ?? 1.35
+                            : 2;
             
                     const graphic = new Graphic({
                         geometry: polygon,
                         symbol: new SimpleFillSymbol({
                             color: hasData ? [...color, fillAlpha] : [128, 128, 128, 0],
                             outline: {
-                                color: hasData ? [...color, outlineAlpha] : [40, 85, 62, 210],
-                                width: tide ? 1.75 : 2
+                                color: hasData ? [...outlineRgb, outlineAlpha] : [40, 85, 62, 210],
+                                width: outlineW
                             }
                         }),
                 attributes: {

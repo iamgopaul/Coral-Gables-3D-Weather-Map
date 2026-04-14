@@ -175,10 +175,22 @@ export const CONFIG = {
      */
     MAP_VISUAL_STYLE: 'gulf-glass',
 
-    /** Gulf Glass — low fill/outline alpha so the basemap reads through the mesh. */
-    GULF_GLASS_GRID_FILL_ALPHA: 14,
-    GULF_GLASS_GRID_OUTLINE_ALPHA: 92,
+    /**
+     * Gulf Glass — translucent temperature tint + soft “sea-glass” edges (outline blended toward a pale mint
+     * so the mesh reads calmer than raw per-cell RGB outlines). Basemap stays visible through the fill.
+     */
+    GULF_GLASS_GRID_FILL_ALPHA: 22,
+    GULF_GLASS_GRID_OUTLINE_ALPHA: 108,
+    /** Thinner wire = less visual noise than Tidefield/Basic. */
+    GULF_GLASS_GRID_OUTLINE_WIDTH: 1.35,
+    /**
+     * Outline = lerp(cellRgb, HIGHLIGHT) — reduces rainbow fringe; 0 = legacy per-cell outline color.
+     */
+    GULF_GLASS_OUTLINE_BLEND: 0.42,
+    GULF_GLASS_OUTLINE_HIGHLIGHT_RGB: [198, 242, 228],
     GULF_GLASS_BEACON_SIZE: 12,
+    /** Station dot fill alpha — slightly more solid than mesh for legibility */
+    GULF_GLASS_BEACON_FILL_ALPHA: 232,
     /** Ring around station dots — UI scan green family */
     GULF_GLASS_BEACON_OUTLINE: [52, 198, 118, 232],
     GULF_GLASS_BEACON_Z_METERS: 48,
