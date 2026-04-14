@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Local dev: http-server defaults to Cache: 3600s; avoid stale ES module / JS during iteration -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <title>Coral Gables 3D Weather Grid</title>
+    <title>The Coral Gables Weather Radar</title>
     <!-- First-paint: hide UI removed by config before styles/main.css loads (stops FOUC on cold load) -->
     <style id="app-critical-shell">
         .hidden { display: none !important; }
@@ -26,8 +26,7 @@
             pointer-events: none !important;
         }
     </style>
-    <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="icon" href="favicon.ico" sizes="any">
+    <link rel="icon" href="/favicon.png?v=20260414" type="image/png">
     <link rel="preconnect" href="https://js.arcgis.com" crossorigin>
     <link rel="dns-prefetch" href="https://js.arcgis.com">
     
@@ -51,6 +50,11 @@
 
         <!-- Slow looping CSS sweep while weather fetch runs (all grid looks, including Tidefield) -->
         <div id="refreshScanOverlay" class="refresh-scan-overlay hidden" aria-hidden="true"></div>
+
+        <!-- Page header (outside the menu rail) -->
+        <div id="appPageHeader" class="app-page-header" aria-label="Application title">
+            <div class="app-page-header__title">The Coral Gables Weather Radar</div>
+        </div>
         
         <!-- Weather Menu: left rail, legend + controls -->
         <div id="mapTaskbar" class="map-taskbar panel panel--collapsible" aria-expanded="true">

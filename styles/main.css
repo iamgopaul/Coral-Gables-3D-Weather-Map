@@ -407,6 +407,42 @@ body {
     width: var(--map-taskbar-collapsed-w);
 }
 
+/* App title — over top-left of the map */
+.app-page-header {
+    position: absolute;
+    top: calc(var(--map-frame-inset) + 10px);
+    left: calc(var(--map-frame-inset) + 10px);
+    z-index: 9;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    width: max-content;
+    max-width: min(520px, calc(100vw - 2 * var(--map-frame-inset) - 20px));
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.52);
+    border: 1px solid rgba(var(--ui-accent-rgb), 0.22);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(12px);
+}
+
+.app-page-header__title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(var(--ui-accent-rgb), 0.92);
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+}
+
+#app:has(#mapTaskbar:not(.panel--minimized)) .app-page-header {
+    left: calc(var(--map-frame-inset) + var(--map-taskbar-expanded-w) + 10px);
+}
+
+#app:has(#mapTaskbar.panel--minimized) .app-page-header {
+    left: calc(var(--map-frame-inset) + var(--map-taskbar-collapsed-w) + 10px);
+}
+
 .map-taskbar__header {
     flex-shrink: 0;
     padding: 8px 12px;

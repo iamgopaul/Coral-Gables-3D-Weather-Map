@@ -1,4 +1,4 @@
-# Coral Gables 3D Weather Grid
+# The Coral Gables Weather Radar
 
 Interactive **ArcGIS Maps SDK for JavaScript** (3D) app: live and forecast weather over Coral Gables, Florida, shown on a deformable grid with **17 sampling points**, historical playback, **split-screen compare**, and alerts.
 
