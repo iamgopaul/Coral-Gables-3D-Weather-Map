@@ -2355,6 +2355,18 @@ function applySplitLinkedHighlight(graphic) {
                 color: accent,
                 width: Math.max(w + 2, 4)
             };
+        } else if (h.type === 'line-3d') {
+            const symLayers = h.symbolLayers;
+            if (symLayers && typeof symLayers.getItemAt === 'function') {
+                const sl0 = symLayers.getItemAt(0);
+                if (sl0) {
+                    const prevSize = Number(sl0.size);
+                    if (Number.isFinite(prevSize)) {
+                        sl0.size = Math.min(prevSize + 2.5, 16);
+                    }
+                    sl0.material = { color: accent };
+                }
+            }
         }
         graphic.symbol = h;
     } catch (e) {
@@ -2411,15 +2423,18 @@ async function handleSplitLinkedClick(clickedView, isLeftPane, event) {
     const otherView = isLeftPane ? state.rightSceneView : state.sceneView;
     const ptLayer = isLeftPane ? state.layers.points : state.layers.splitPoints;
     const gridLayer = isLeftPane ? state.layers.grid : state.layers.splitGrid;
+    const windLayer = isLeftPane ? state.layers.wind : state.layers.splitWind;
     const otherPtLayer = isLeftPane ? state.layers.splitPoints : state.layers.points;
     const otherGridLayer = isLeftPane ? state.layers.splitGrid : state.layers.grid;
+    const otherWindLayer = isLeftPane ? state.layers.splitWind : state.layers.wind;
 
     state.splitClickHandling = true;
     state.splitSuppressCameraSync = true;
     try {
         let response;
         try {
-            response = await clickedView.hitTest(event, { include: [ptLayer, gridLayer] });
+            const include = [ptLayer, gridLayer, windLayer].filter(Boolean);
+            response = await clickedView.hitTest(event, { include });
         } catch (e) {
             return;
         }
@@ -2429,7 +2444,7 @@ async function handleSplitLinkedClick(clickedView, isLeftPane, event) {
                 return false;
             }
             const lyr = r.graphic.layer || r.layer;
-            return lyr === ptLayer || lyr === gridLayer;
+            return lyr === ptLayer || lyr === gridLayer || lyr === windLayer;
         });
         const hitGraphic = hit?.graphic;
 
@@ -2449,10 +2464,17 @@ async function handleSplitLinkedClick(clickedView, isLeftPane, event) {
         }
 
         const attrs = hitGraphic.attributes || {};
+        const hitLyr = hitGraphic.layer;
         let matchOther = null;
-        if (attrs.pointId) {
+        if (hitLyr === windLayer && otherWindLayer) {
+            if (attrs.kind === 'coral-gables-wind') {
+                matchOther = findGraphicByAttribute(otherWindLayer, 'kind', 'coral-gables-wind');
+            } else if (attrs.pointId != null && attrs.pointId !== '') {
+                matchOther = findGraphicByAttribute(otherWindLayer, 'pointId', attrs.pointId);
+            }
+        } else if (hitLyr === ptLayer && attrs.pointId) {
             matchOther = findGraphicByAttribute(otherPtLayer, 'pointId', attrs.pointId);
-        } else if (attrs.cellId) {
+        } else if (hitLyr === gridLayer && attrs.cellId) {
             matchOther = findGraphicByAttribute(otherGridLayer, 'cellId', attrs.cellId);
         }
 

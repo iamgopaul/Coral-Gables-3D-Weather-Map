@@ -44,30 +44,57 @@ function windVectorLineColor(mph) {
     return [...cols[3]];
 }
 
-/** NWS-style merged reading or center sampling point — for map + legend wind line. */
-function getCoralGablesWindReading(state) {
-    const w = state?.coralGablesLiveWeather;
-    if (
-        w &&
-        typeof w.windSpeed === 'number' &&
-        Number.isFinite(w.windSpeed) &&
-        typeof w.windDirection === 'number' &&
-        Number.isFinite(w.windDirection)
-    ) {
-        return { speed: w.windSpeed, fromDeg: w.windDirection };
+/**
+ * Vector-mean wind over all sampling stations (meteorological “wind from” °, speed mph).
+ * ū = mean(speed·sin θ), v̄ = mean(speed·cos θ) → resultant speed = √(ū²+v̄²), direction = atan2(ū,v̄).
+ * Matches common “area mean wind” / resultant averaging (not a sum of speeds).
+ *
+ * @param {Array<any>} samplingPoints
+ * @returns {{ speed: number, fromDeg: number } | null}
+ */
+function getMeanWindFromSamplingPoints(samplingPoints) {
+    if (!samplingPoints?.length) {
+        return null;
     }
-    const center = state?.samplingPoints?.find((p) => p.id === 'center');
-    const wd = center?.weatherData;
-    if (
-        wd &&
-        typeof wd.windSpeed === 'number' &&
-        Number.isFinite(wd.windSpeed) &&
-        typeof wd.windDirection === 'number' &&
-        Number.isFinite(wd.windDirection)
-    ) {
-        return { speed: wd.windSpeed, fromDeg: wd.windDirection };
+    let sumSin = 0;
+    let sumCos = 0;
+    let n = 0;
+    for (const p of samplingPoints) {
+        const wd = p?.weatherData;
+        if (!wd || wd.error) {
+            continue;
+        }
+        const speed = Number(wd.windSpeed);
+        const rawDir = wd.windDirection;
+        if (!Number.isFinite(speed) || speed <= 0) {
+            continue;
+        }
+        const deg =
+            typeof rawDir === 'number' && Number.isFinite(rawDir)
+                ? rawDir
+                : Number(rawDir);
+        if (!Number.isFinite(deg)) {
+            continue;
+        }
+        const rad = (deg * Math.PI) / 180;
+        sumSin += speed * Math.sin(rad);
+        sumCos += speed * Math.cos(rad);
+        n += 1;
     }
-    return null;
+    if (n === 0) {
+        return null;
+    }
+    const uBar = sumSin / n;
+    const vBar = sumCos / n;
+    const meanSpeed = Math.sqrt(uBar * uBar + vBar * vBar);
+    if (!Number.isFinite(meanSpeed) || meanSpeed <= 0) {
+        return null;
+    }
+    let fromDeg = (Math.atan2(uBar, vBar) * 180) / Math.PI;
+    if (fromDeg < 0) {
+        fromDeg += 360;
+    }
+    return { speed: meanSpeed, fromDeg };
 }
 
 /**
@@ -168,7 +195,8 @@ export function renderWindVectors({ samplingPoints, layersOverride = null, state
                     }
                 });
 
-                const cgWind = getCoralGablesWindReading(state);
+                /** City-scale indicator at {@link CONFIG.CORAL_GABLES_CENTER} — area mean, not the center station. */
+                const cgWind = getMeanWindFromSamplingPoints(samplingPoints);
                 if (cgWind && cgWind.speed > 0) {
                     const { speed: cgSpeed, fromDeg: cgFrom } = cgWind;
                     const downDeg = (cgFrom + 180) % 360;
@@ -209,12 +237,12 @@ export function renderWindVectors({ samplingPoints, layersOverride = null, state
                             windFromLabel: compass
                         },
                         popupTemplate: new PopupTemplate({
-                            title: 'Coral Gables wind',
+                            title: 'Area wind (mean of stations)',
                             content:
                                 '<div style="font-size:13px;line-height:1.45">' +
-                                '<div><b>{windSpeedMph}</b> mph</div>' +
+                                '<div><b>{windSpeedMph}</b> mph resultant</div>' +
                                 '<div>From <b>{windFromLabel}</b> ({windFromDegrees}°)</div>' +
-                                '<div style="opacity:0.75;font-size:11px;margin-top:6px">Arrow shows downwind (where air is moving).</div>' +
+                                '<div style="opacity:0.75;font-size:11px;margin-top:6px">Vector average of all grid sampling points. Arrow shows downwind.</div>' +
                                 '</div>'
                         })
                     });
@@ -224,7 +252,7 @@ export function renderWindVectors({ samplingPoints, layersOverride = null, state
                 if (vectorsAdded > 0 || (cgWind && cgWind.speed > 0)) {
                     debugLog?.(
                         `💨 Wind vectors: ${vectorsAdded} field arrows` +
-                            (cgWind && cgWind.speed > 0 ? ' + Coral Gables indicator' : '')
+                            (cgWind && cgWind.speed > 0 ? ' + area-mean wind (city marker)' : '')
                     );
                 }
             } catch (windErr) {

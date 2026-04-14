@@ -604,7 +604,10 @@ body {
         align-items: center;
         gap: 12px 16px;
     }
+}
 
+/* Left-rail minimized strip only — not phones (≤720px use bottom-sheet layout in max-width block) */
+@media (min-width: 721px) {
     #mapTaskbar.panel--minimized .map-taskbar__header-brand {
         flex-direction: column;
         flex-wrap: nowrap;
@@ -1524,7 +1527,7 @@ select.lighting-test-hud-select option {
     :root {
         --map-frame-inset: 8px;
         --map-mobile-sheet-max-h: min(56dvh, 440px);
-        --map-mobile-sheet-collapsed-h: 72px;
+        --map-mobile-sheet-collapsed-h: 80px;
     }
 
     .map-taskbar__col--legend {
@@ -1554,12 +1557,22 @@ select.lighting-test-hud-select option {
             inset 0 1px 0 rgba(255, 255, 255, 0.04);
     }
 
+    /* Minimized: full-width strip — override desktop collapsed *width* (narrow left rail) */
     #mapTaskbar.panel--minimized.map-taskbar {
+        width: auto;
+        max-width: none;
+        left: var(--map-frame-inset);
+        right: var(--map-frame-inset);
         height: auto;
         max-height: none;
         min-height: var(--map-mobile-sheet-collapsed-h);
         border-radius: var(--map-frame-radius);
+        border: var(--map-frame-border);
         border-bottom: var(--map-frame-border);
+        box-shadow:
+            0 8px 28px rgba(0, 0, 0, 0.4),
+            0 0 0 1px rgba(0, 0, 0, 0.35),
+            inset 0 1px 0 rgba(255, 255, 255, 0.04);
     }
 
     /* Map frame: menu no longer consumes horizontal space */
@@ -1620,14 +1633,15 @@ select.lighting-test-hud-select option {
         font-size: clamp(10px, 2.8vw, 12px);
     }
 
-    /* Collapsed menu: single horizontal strip (readable on narrow screens) */
-    #mapTaskbar.panel--minimized .map-taskbar__header {
+    /* Collapsed menu: single horizontal strip (override desktop minimized column layout) */
+    #mapTaskbar.panel--minimized.map-taskbar .map-taskbar__header {
         flex-direction: row;
         align-items: center;
         flex-wrap: nowrap;
         justify-content: space-between;
         padding: 10px 12px;
         gap: 8px;
+        border-bottom: none;
     }
 
     #mapTaskbar.panel--minimized .map-taskbar__title {
