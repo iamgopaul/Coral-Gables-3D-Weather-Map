@@ -317,6 +317,7 @@ export async function fetchBatchWeather(samplingPoints, onProgress = null, optio
         return [];
     }
 
+    const useOwm = isOpenWeatherMapConfigured();
     const concurrency = Math.max(1, Math.min(Number(CONFIG.WEATHER_BATCH_CONCURRENCY) || 6, n));
     const waveGap = Number(CONFIG.WEATHER_BATCH_WAVE_GAP_MS) || 0;
     const results = new Array(n);
@@ -329,7 +330,9 @@ export async function fetchBatchWeather(samplingPoints, onProgress = null, optio
         }
     };
 
-    async function fetchIndex(i) {
+    /** Indices that still need Open-Meteo (+ optional OWM); center may be satisfied from `centerWeather`. */
+    const indicesToResolve = [];
+    for (let i = 0; i < n; i++) {
         const point = samplingPoints[i];
         if (centerWeather && point.id === centerPointId) {
             results[i] = {
@@ -340,17 +343,57 @@ export async function fetchBatchWeather(samplingPoints, onProgress = null, optio
                 success: true
             };
             bump();
-            return;
+        } else {
+            indicesToResolve.push(i);
+        }
+    }
+
+    /** @type {object[]|null} */
+    let openMeteoMulti = null;
+    if (indicesToResolve.length > 0) {
+        if (!useOwm) {
+            warnOpenWeatherMapDisabled();
         }
         try {
-            const weatherData = await fetchCurrentWeather(point.latitude, point.longitude, {
-                mergePriority
-            });
+            const pts = indicesToResolve.map((idx) => samplingPoints[idx]);
+            openMeteoMulti = await OpenMeteo.fetchCurrentWeatherMany(pts);
+            if (!openMeteoMulti || openMeteoMulti.length !== indicesToResolve.length) {
+                openMeteoMulti = null;
+            }
+        } catch (e) {
+            console.warn('[weather] Open-Meteo multi-location fetch failed; using per-station requests', e);
+            openMeteoMulti = null;
+        }
+    }
+
+    const indexToBatchPos = new Map();
+    indicesToResolve.forEach((idx, k) => indexToBatchPos.set(idx, k));
+
+    async function resolveOne(i) {
+        const point = samplingPoints[i];
+        try {
+            let merged;
+            if (openMeteoMulti) {
+                const k = indexToBatchPos.get(i);
+                const om = openMeteoMulti[k];
+                const sources = [];
+                if (useOwm) {
+                    sources.push(await OpenWeatherMap.fetchCurrentWeather(point.latitude, point.longitude));
+                }
+                sources.push(om);
+                merged = mergeWeatherData(sources, mergePriority);
+                merged.sources = sources.map((s) => s.source).join(', ');
+                merged.source = merged.sources;
+            } else {
+                merged = await fetchCurrentWeather(point.latitude, point.longitude, {
+                    mergePriority
+                });
+            }
             results[i] = {
                 pointId: point.id,
                 latitude: point.latitude,
                 longitude: point.longitude,
-                ...weatherData,
+                ...merged,
                 success: true
             };
         } catch (error) {
@@ -366,14 +409,14 @@ export async function fetchBatchWeather(samplingPoints, onProgress = null, optio
         bump();
     }
 
-    for (let start = 0; start < n; start += concurrency) {
-        const end = Math.min(start + concurrency, n);
+    for (let start = 0; start < indicesToResolve.length; start += concurrency) {
+        const end = Math.min(start + concurrency, indicesToResolve.length);
         const wave = [];
-        for (let i = start; i < end; i++) {
-            wave.push(fetchIndex(i));
+        for (let j = start; j < end; j++) {
+            wave.push(resolveOne(indicesToResolve[j]));
         }
         await Promise.all(wave);
-        if (waveGap > 0 && end < n) {
+        if (waveGap > 0 && end < indicesToResolve.length) {
             await new Promise((r) => setTimeout(r, waveGap));
         }
     }

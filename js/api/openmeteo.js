@@ -5,6 +5,12 @@
 
 const OPEN_METEO_MAX_ATTEMPTS = 6;
 
+/** `current=` variables — shared by single- and multi-location requests */
+const OPEN_METEO_CURRENT_VARS =
+    'temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,cloud_cover,visibility';
+
+const OPEN_METEO_UNITS = 'temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto';
+
 /**
  * Fair-use: retry on HTTP 429 with backoff (and optional Retry-After seconds).
  * @param {string} url
@@ -31,7 +37,7 @@ async function openMeteoFetch(url) {
  * Fetch current weather from Open-Meteo
  */
 export async function fetchCurrentWeather(latitude, longitude) {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,cloud_cover,visibility&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=${OPEN_METEO_CURRENT_VARS}&${OPEN_METEO_UNITS}`;
 
     try {
         const response = await openMeteoFetch(url);
@@ -46,6 +52,41 @@ export async function fetchCurrentWeather(latitude, longitude) {
         console.error('Open-Meteo fetch error:', error);
         throw error;
     }
+}
+
+/**
+ * One HTTP round-trip for many coordinates (Open-Meteo returns a JSON array in request order).
+ * @param {{ latitude: number, longitude: number }[]} points
+ * @returns {Promise<object[]>} Parsed current conditions per point (same length as `points`)
+ */
+export async function fetchCurrentWeatherMany(points) {
+    const n = points.length;
+    if (n === 0) {
+        return [];
+    }
+    if (n === 1) {
+        const p = points[0];
+        return [await fetchCurrentWeather(p.latitude, p.longitude)];
+    }
+
+    const lats = points.map((p) => p.latitude).join(',');
+    const lons = points.map((p) => p.longitude).join(',');
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&current=${OPEN_METEO_CURRENT_VARS}&${OPEN_METEO_UNITS}`;
+
+    const response = await openMeteoFetch(url);
+    if (!response.ok) {
+        throw new Error(`Open-Meteo API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+        throw new Error('Open-Meteo batch: expected JSON array');
+    }
+    if (data.length !== n) {
+        throw new Error(`Open-Meteo batch: expected ${n} location(s), got ${data.length}`);
+    }
+
+    return data.map((block) => parseOpenMeteoData(block));
 }
 
 /**
